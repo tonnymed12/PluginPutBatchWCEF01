@@ -32,7 +32,7 @@ sap.ui.define([
                 descripcion: "",
                 descripcion2: "",
                 cantidadNecesaria: 0,
-                cantidadNecesaria2:0,
+                cantidadNecesaria2: 0,
                 cantidadEscaneada: 0,
                 cantidadEscaneada2: 0
             });
@@ -1101,7 +1101,7 @@ sap.ui.define([
                 .then(function (data) {
                     const oBomData = Array.isArray(data) ? data[0] : data;
                     const aComponents = (oBomData && Array.isArray(oBomData.components)) ? oBomData.components : [];
-                    const oNormalComponent = aComponents.find(function (oComp) {
+                    const oNormalComponent = aComponents.filter(function (oComp) {
                         return oComp && oComp.componentType === "NORMAL";
                     });
 
@@ -1111,33 +1111,56 @@ sap.ui.define([
                     }
 
                     const oOrderSummaryModel = this.getView().getModel("orderSummary");
-                    const sBatch = oNormalComponent.batchNumber || "";
-                    const sMaterial = (oNormalComponent.material && oNormalComponent.material.material) || "";
-                    const nCantidadNecesaria = Number(oNormalComponent.totalQuantity || 0);
 
-                    // oOrderSummaryModel.setProperty("/lote", sBatch);
-                    oOrderSummaryModel.setProperty("/material", sMaterial);
-                    oOrderSummaryModel.setProperty("/cantidadNecesaria", nCantidadNecesaria);
+                    const oComp1 = oNormalComponent[0];
+                    const oComp2 = oNormalComponent[1] || null;
 
-                    this.getHeaderMaterial({ material: sMaterial, plant: oPODParams.PLANT_ID }, oSapApi)
+                    const sMaterial1 = (oComp1.material && oComp1.material.material);
+                    const sMaterial2 = oComp2 ? (oComp2.material && oComp2.material.material) || "" : "";
+
+                    oOrderSummaryModel.setProperty("/material", sMaterial1);
+                    oOrderSummaryModel.setProperty("/cantidadNecesaria", Number(oComp1.totalQuantity || 0));
+
+                    if (oComp2) {
+                        oOrderSummaryModel.setProperty("/material2", sMaterial2);
+                        oOrderSummaryModel.setProperty("/cantidadNecesaria2", Number(oComp2.totalQuantity || 0));
+                    }
+
+                    const aPromesas = [
+                        this.getHeaderMaterial({ material: sMaterial1, plant: oPODParams.PLANT_ID }, oSapApi),
+                        oComp2
+                            ? this.getHeaderMaterial({ material: sMaterial2, plant: oPODParams.PLANT_ID }, oSapApi)
+                            : Promise.resolve(null)
+                    ];
+
+                    Promise.all(aPromesas)
                         .then(function (headerData) {
-                            const oHeader = Array.isArray(headerData) ? headerData[0] : headerData;
-                            const sDescripcion = (oHeader && oHeader.description) || "";
-                            oOrderSummaryModel.setProperty("/descripcion", sDescripcion);
+                            const oHeader1 = Array.isArray(headerData[0]) ? headerData[0][0] : headerData[0];
+                            const oHeader2 = Array.isArray(headerData[1]) ? headerData[1][0] : headerData[1];
+
+                            const descripcion1 = (oHeader1 && oHeader1.description) || "";
+                            const descripcion2 = (oHeader2 && oHeader2.description) || "";
+
+                            oOrderSummaryModel.setProperty("/descripcion", descripcion1);
+                            if (oComp2) {
+                                oOrderSummaryModel.setProperty("/descripcion2", (oHeader2 && oHeader2.description) || "");
+                            }
+
+                            this._updateOrderSummaryScannedQty();
 
                         }.bind(this))
                         .catch(function (error) {
-                            console.error("[OrderSummary Test] Error:", error);
-                            sap.m.MessageToast.show(oBundle.getText("errorObtenerHeaderMaterial", [sMaterial]));
+                            console.error("[OrderSummary] Error obteniendo descripciones:", error);
+                            sap.m.MessageToast.show(oBundle.getText("errorObtenerHeaderMaterial", []));
                         }.bind(this));
 
-                    this._updateOrderSummaryScannedQty();
                 }.bind(this))
                 .catch(function (error) {
-                    console.error("[OrderSummary Test] Error:", error);
+                    console.error("[OrderSummary] Error:", error);
                     sap.m.MessageToast.show(oBundle.getText("errorObtenerBom", [order]));
                 }.bind(this));
         },
+
         _updateOrderSummaryScannedQty: function (aItems) {
             const oOrderSummaryModel = this.getView().getModel("orderSummary");
             if (!oOrderSummaryModel) {
@@ -1213,8 +1236,8 @@ sap.ui.define([
                     // El PP devuelve el array dentro de "stockResponse"
                     var aData = Array.isArray(oRes) ? oRes
                         : (Array.isArray(oRes && oRes.stockResponse) ? oRes.stockResponse
-                        : (Array.isArray(oRes && oRes.outLotes) ? oRes.outLotes
-                        : (Array.isArray(oRes && oRes.content) ? oRes.content : [])));
+                            : (Array.isArray(oRes && oRes.outLotes) ? oRes.outLotes
+                                : (Array.isArray(oRes && oRes.content) ? oRes.content : [])));
 
                     var aItems = aData.map(function (oItem) {
                         var sMat = oItem.material;
