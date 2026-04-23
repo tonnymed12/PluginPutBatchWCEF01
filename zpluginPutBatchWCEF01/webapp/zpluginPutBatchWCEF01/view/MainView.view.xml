@@ -48,22 +48,26 @@ controllerName="serviacero.custom.plugins.zpluginPutBatchWCEF01.zpluginPutBatchW
                 <VBox width="20%" class="sapUiSmallMarginBeginEnd">
                     <Label text="{i18n>materialCode}"/>
                     <Input id="orderMaterial" value="{orderSummary>/material}" enabled="false" width="100%"/>
+                    <Input id="orderMaterial2" value="{orderSummary>/material2}" enabled="false" width="100%"/>
                 </VBox>
                 <VBox width="30%" class="sapUiSmallMarginEnd">
                     <Label text="{i18n>descripcionMaterial}"/>
                     <Input id="orderDescripcion" value="{orderSummary>/descripcion}" enabled="false" width="100%"/>
+                    <Input id="orderDescripcion2" value="{orderSummary>/descripcion2}" enabled="false" width="100%"/>
                 </VBox>
                 <VBox width="15%" class="sapUiSmallMarginEnd">
                     <Label text="{i18n>cantidadNecesaria}"/>
                     <Input id="orderCantidadNecesaria" value="{orderSummary>/cantidadNecesaria}" enabled="false" width="100%"/>
+                    <Input id="orderCantidadNecesaria2" value="{orderSummary>/cantidadNecesaria2}" enabled="false" width="100%"/>
                 </VBox>
                 <VBox width="15%">
                     <Label text="{i18n>cantidadEscaneada}"/>
                     <Input id="orderCantidadEscaneada" value="{orderSummary>/cantidadEscaneada}" enabled="false" width="100%"/>
+                    <Input id="orderCantidadEscaneada2" value="{orderSummary>/cantidadEscaneada2}" enabled="false" width="100%"/>
                 </VBox>
                 <VBox width="15%">
                     <Button id="lotesBoton" text="{i18n>lotesAsignados}" press=".onPressOpenFragmentList" 
-                    width="100px" class="sapUiSmallMarginBeginEnd sapUiSmallMarginTop" icon="sap-icon://list" />
+                    width="auto" class="sapUiSmallMarginBeginEnd sapUiSmallMarginTop" icon="sap-icon://list" />
                 </VBox>
 
             </HBox>

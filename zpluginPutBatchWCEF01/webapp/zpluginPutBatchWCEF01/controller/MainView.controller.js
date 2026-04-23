@@ -28,9 +28,13 @@ sap.ui.define([
             const oOrderSummaryModel = new JSONModel({
                 // lote: "",
                 material: "",
+                material2: "",
                 descripcion: "",
+                descripcion2: "",
                 cantidadNecesaria: 0,
-                cantidadEscaneada: 0
+                cantidadNecesaria2:0,
+                cantidadEscaneada: 0,
+                cantidadEscaneada2: 0
             });
             this.getView().setModel(oOrderSummaryModel, "orderSummary");
 

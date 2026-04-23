@@ -6,7 +6,7 @@
      id="batchListDialog"
      title="{i18n>fragmentTitle}"
      placement="Bottom"
-     contentWidth="600px"
+     contentWidth="700px"
      afterClose=".onAfterClosePopoverInventario">
 
     <content>
@@ -15,21 +15,18 @@
              width="100%"
              items="{/ITEMS}">
         <columns>
-          <Column width="20%">
+          <Column width="25%">
             <Label text="{i18n>material}"/>
           </Column>
           <Column width="20%">
             <Label text="{i18n>lote}"/>
           </Column>
-          <Column width="20%">
+          <Column width="10%">
             <Label text="{i18n>cantidad}"/>
           </Column>
-          <Column width="20%">
+          <Column width="35%">
             <Label text="{i18n>codigoEscaneo}"/>
           </Column>
-          <!-- <Column width="20%" hAlign="Center">
-            <Label text=""/>
-          </Column> -->
         </columns>
         <items>
           <ColumnListItem>
@@ -37,7 +34,6 @@
               <Text text="{MATERIAL}"/>
               <Text text="{LOTE}"/>
               <Text text="{CANTIDAD}"/>
-              <!-- <Text text="{CODIGO}"/> -->
               <Link text="{CODIGO}" press=".onCopiarCodigo"/>
             </cells>
           </ColumnListItem>
