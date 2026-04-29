@@ -1,136 +1,244 @@
-<mvc:View 
-xmlns:mvc="sap.ui.core.mvc" 
-xmlns="sap.m" 
-xmlns:l="sap.ui.layout" 
-xmlns:f="sap.ui.layout.form" 
-xmlns:core="sap.ui.core" 
-xmlns:ndc="sap.ndc"
-xmlns:html="http://www.w3.org/1999/xhtml" 
-controllerName="serviacero.custom.plugins.zpluginPutBatchWCEF01.zpluginPutBatchWCEF01.controller.MainView" width="100%" height="100%">
-		
-       <Panel
-                id="idPluginPanel"
-                width="100%"
-                height="100%"
-                expandable="false"
-                expanded="false"
-                accessibleRole="Region"
-                backgroundDesign="Transparent"
-                class="sapUiNoContentPadding">
+<mvc:View
+    xmlns:mvc="sap.ui.core.mvc"
+    xmlns="sap.m"
+    xmlns:l="sap.ui.layout"
+    xmlns:core="sap.ui.core"
+    xmlns:ndc="sap.ndc"
+    controllerName="serviacero.custom.plugins.zpluginPutBatchWCEF01.zpluginPutBatchWCEF01.controller.MainView"
+    width="100%" height="100%">
 
-            <HBox width="80%" class="sapUiSmallMarginBottom">
-              <MessageStrip text="{i18n>scannerReady}" type="Information" showIcon="true"
-                customIcon="sap-icon://bar-code" class="sapUiSmallMarginTop sapUiSmallMarginBeginEnd sapUiSmallMarginBottom" />
-            </HBox>
+    <Panel
+        id="idPluginPanel"
+        width="100%"
+        height="100%"
+        expandable="false"
+        expanded="false"
+        accessibleRole="Region"
+        backgroundDesign="Transparent"
+        class="sapUiNoContentPadding">
 
-            <HBox width="80%" class="sapUiSmallMarginBottom sapUiSmallMarginBeginEnd" alignItems="Center">
-                <Label text="{i18n>Barcode}" class="sapUiSmallMarginEnd"/>
-                <Input id="scanInput" submit=".onBarcodeSubmit" class="sapUiSmallMarginEnd sapUiSmallMarginBeginEnd" width="300px"/>
-                <ndc:BarcodeScannerButton
-                    id="sampleBarcodeScannerButton"
-                    scanSuccess="onScanSuccess"
-                    scanFail="onScanError"
-                    inputLiveUpdate="onScanLiveupdate"
-                    dialogTitle="{i18n>BarcodeScanner}"
-                    class="sapUiMediumMarginBegin sapUiSmallMarginEnd"
-                />
-            </HBox>
+        <!-- ═══ BARCODE INPUT ═══ -->
+        <HBox width="80%" class="sapUiSmallMarginBottom">
+            <MessageStrip text="{i18n>scannerReady}" type="Information" showIcon="true"
+                customIcon="sap-icon://bar-code"
+                class="sapUiSmallMarginTop sapUiSmallMarginBeginEnd sapUiSmallMarginBottom" />
+        </HBox>
+        <HBox width="80%" class="sapUiSmallMarginBottom sapUiSmallMarginBeginEnd" alignItems="Center">
+            <Label text="{i18n>Barcode}" class="sapUiSmallMarginEnd"/>
+            <Input id="scanInput" submit=".onBarcodeSubmit" liveChange=".onScanLiveupdate"
+                class="sapUiSmallMarginEnd sapUiSmallMarginBeginEnd" width="300px"/>
+            <ndc:BarcodeScannerButton
+                id="sampleBarcodeScannerButton"
+                scanSuccess="onScanSuccess"
+                scanFail="onScanError"
+                inputLiveUpdate="onScanLiveupdate"
+                dialogTitle="{i18n>BarcodeScanner}"
+                class="sapUiMediumMarginBegin sapUiSmallMarginEnd"/>
+        </HBox>
 
-            <!-- Resumen de orden -->
-            <HBox width="80%" class="sapUiTinyMarginBeginEnd sapUiTinyMarginTop">
-                <Title text="{i18n>orderSummary}" level="H5" class="sapUiSmallMarginBeginEnd"/>
-            </HBox>
-            <HBox width="80%" class="sapUiSmallMarginBeginEnd sapUiSmallMarginBottom" alignItems="Center">
-                <!-- <VBox width="20%">
-                    <Label text="{i18n>loteCode}"/>
-                    <Input id="orderLote" value="{orderSummary>/lote}" enabled="false" width="100%"/>
-                </VBox> -->
-                <VBox width="20%" class="sapUiSmallMarginBeginEnd">
-                    <Label text="{i18n>materialCode}"/>
-                    <Input id="orderMaterial" value="{orderSummary>/material}" enabled="false" width="100%"/>
-                    <Input id="orderMaterial2" value="{orderSummary>/material2}" enabled="false" width="100%"/>
-                </VBox>
-                <VBox width="30%" class="sapUiSmallMarginEnd">
-                    <Label text="{i18n>descripcionMaterial}"/>
-                    <Input id="orderDescripcion" value="{orderSummary>/descripcion}" enabled="false" width="100%"/>
-                    <Input id="orderDescripcion2" value="{orderSummary>/descripcion2}" enabled="false" width="100%"/>
-                </VBox>
-                <VBox width="15%" class="sapUiSmallMarginEnd">
-                    <Label text="{i18n>cantidadNecesaria}"/>
-                    <Input id="orderCantidadNecesaria" value="{orderSummary>/cantidadNecesaria}" enabled="false" width="100%"/>
-                    <Input id="orderCantidadNecesaria2" value="{orderSummary>/cantidadNecesaria2}" enabled="false" width="100%"/>
-                </VBox>
-                <VBox width="15%">
-                    <Label text="{i18n>cantidadEscaneada}"/>
-                    <Input id="orderCantidadEscaneada" value="{orderSummary>/cantidadEscaneada}" enabled="false" width="100%"/>
-                    <Input id="orderCantidadEscaneada2" value="{orderSummary>/cantidadEscaneada2}" enabled="false" width="100%"/>
-                </VBox>
-                <VBox width="15%">
-                    <Button id="lotesBoton" text="{i18n>lotesAsignados}" press=".onPressOpenFragmentList" 
-                    width="auto" class="sapUiSmallMarginBeginEnd sapUiSmallMarginTop" icon="sap-icon://list" />
-                </VBox>
+        <!-- ═══ RESUMEN DE ORDEN ═══ -->
+        <HBox width="97%" class="sapUiTinyMarginBeginEnd sapUiTinyMarginTop">
+            <Title text="{i18n>orderSummary}" level="H5" class="sapUiSmallMarginBeginEnd"/>
+        </HBox>
 
-            </HBox>
-            
-            <HBox width="97%" justifyContent="Center" class="sapUiSmallMarginTop sapUiSmallMarginBeginEnd">
-            <Table busyIndicatorDelay="5" id="idSlotTable" items="{/ITEMS}"
-                class="sapUiSmallMarginTop" width="100%" alternateRowColors="true">
+        <!-- Cabeceras de columnas del resumen -->
+        <HBox width="97%" class="sapUiSmallMarginBeginEnd sapUiTinyMarginBottom" alignItems="Center">
+            <VBox width="70px"/>
+            <VBox width="18%" class="sapUiSmallMarginEnd"><Label text="{i18n>materialCode}"/></VBox>
+            <VBox width="30%" class="sapUiSmallMarginEnd"><Label text="{i18n>descripcionMaterial}"/></VBox>
+            <VBox width="12%" class="sapUiSmallMarginEnd"><Label text="{i18n>cantidadNecesaria}"/></VBox>
+            <VBox width="12%"><Label text="{i18n>cantidadEscaneada}"/></VBox>
+        </HBox>
+
+        <!-- Fila Alambre (/material = comp1) -->
+        <HBox width="97%" class="sapUiSmallMarginBeginEnd sapUiTinyMarginBottom" alignItems="Center">
+            <Label text="{i18n>alambre}" design="Bold" class="sapUiSmallMarginEnd" width="70px"/>
+            <VBox width="18%" class="sapUiSmallMarginEnd">
+                <Input id="orderMaterial" value="{orderSummary>/material}" enabled="false" width="100%"/>
+            </VBox>
+            <VBox width="30%" class="sapUiSmallMarginEnd">
+                <Input id="orderDescripcion" value="{orderSummary>/descripcion}" enabled="false" width="100%"/>
+            </VBox>
+            <VBox width="12%" class="sapUiSmallMarginEnd">
+                <Input id="orderCantidadNecesaria" value="{orderSummary>/cantidadNecesaria}" enabled="false" width="100%"/>
+            </VBox>
+            <VBox width="12%">
+                <Input id="orderCantidadEscaneada" value="{orderSummary>/cantidadEscaneada}" enabled="false" width="100%"/>
+            </VBox>
+        </HBox>
+
+        <!-- Fila Solera (/material2 = comp2) -->
+        <HBox width="97%" class="sapUiSmallMarginBeginEnd sapUiSmallMarginBottom" alignItems="Center">
+            <Label text="{i18n>solera}" design="Bold" class="sapUiSmallMarginEnd" width="70px"/>
+            <VBox width="18%" class="sapUiSmallMarginEnd">
+                <Input id="orderMaterial2" value="{orderSummary>/material2}" enabled="false" width="100%"/>
+            </VBox>
+            <VBox width="30%" class="sapUiSmallMarginEnd">
+                <Input id="orderDescripcion2" value="{orderSummary>/descripcion2}" enabled="false" width="100%"/>
+            </VBox>
+            <VBox width="12%" class="sapUiSmallMarginEnd">
+                <Input id="orderCantidadNecesaria2" value="{orderSummary>/cantidadNecesaria2}" enabled="false" width="100%"/>
+            </VBox>
+            <VBox width="12%">
+                <Input id="orderCantidadEscaneada2" value="{orderSummary>/cantidadEscaneada2}" enabled="false" width="100%"/>
+            </VBox>
+        </HBox>
+
+        <!-- ═══ TOGGLE SOLERA / ALAMBRE ═══ -->
+        <HBox width="97%" class="sapUiSmallMarginBeginEnd sapUiSmallMarginTop" alignItems="Center" justifyContent="Center">
+            <SegmentedButton id="tableToggle" selectedKey="ALM" selectionChange=".onToggleTable">
+                <items>
+                    <SegmentedButtonItem key="ALM" text="{i18n>alambre}" width="300px"/>
+                    <SegmentedButtonItem key="SOL" text="{i18n>solera}" width="300px"/>
+                </items>
+            </SegmentedButton>
+        </HBox>
+
+        <!-- Inputs ocultos para cantidades y tipo de slot -->
+        <Input id="slotQty_sol" visible="false"/>
+        <Input id="slotQty_alm" visible="false"/>
+        <Input id="slotType"    visible="false"/>
+
+        <!-- ═══ TABLA ALAMBRE (visible por defecto) ═══ -->
+        <HBox id="containerAlm" width="97%" justifyContent="Center"
+              class="sapUiSmallMarginTop sapUiSmallMarginBeginEnd" visible="true">
+            <Table id="idSlotTableAlm" items="{/ITEMS}"
+                   class="sapUiSmallMarginTop" width="100%" alternateRowColors="true">
                 <headerToolbar>
-                    <Toolbar >
-                        <Title text="{i18n>Items} ({= ${/ITEMS}.length})" />
-                        <ToolbarSpacer />
-                        <Button id="refreshBoton" text="{i18n>refresh}" press=".onPressRefresh" 
-                        width="100px" class="sapUiSmallMarginBeginEnd" icon="sap-icon://refresh" type="Attention"/>
-                        <Button id="clearButton" text="{i18n>clear}" press=".onPressClear" 
-                        width="100px" class="sapUiSmallMarginBeginEnd" icon="sap-icon://clear-all" type="Reject"/>
+                    <Toolbar>
+                        <Title text="{i18n>alambre}"/>
+                        <ToolbarSpacer/>
+                        <Button text="{i18n>lotesAsignados}" press=".onPressOpenFragmentList"
+                                icon="sap-icon://list" class="sapUiSmallMarginEnd">
+                            <customData>
+                                <core:CustomData key="grupo" value="ALM"/>
+                            </customData>
+                        </Button>
+                        <Button text="{i18n>refresh}" press=".onPressRefresh"
+                                width="100px" icon="sap-icon://refresh" type="Attention"
+                                class="sapUiSmallMarginBeginEnd"/>
+                        <Button text="{i18n>clear}" press=".onPressClear"
+                                width="100px" icon="sap-icon://clear-all" type="Reject"
+                                class="sapUiSmallMarginBeginEnd"/>
                     </Toolbar>
                 </headerToolbar>
                 <columns>
                     <Column width="30%" hAlign="Left" vAlign="Middle" visible="false">
-                        <Text text="{i18n>Slot}" visible="false" />
+                        <Text text="{i18n>Slot}" visible="false"/>
                     </Column>
-                    <Column width="30%" hAlign="Left" vAlign="Middle" >
-                        <Text text="{i18n>materialCode}" />
+                    <Column width="30%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>materialCode}"/>
                     </Column>
-                    <Column width="30%" hAlign="Left" vAlign="Middle" >
-                        <Text text="{i18n>loteCode}"  />
+                    <Column width="30%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>loteCode}"/>
                     </Column>
-                    <Column width="15%" hAlign="Left" vAlign="Middle" >
-                        <Text text="{i18n>secuenciaCode}" />
+                    <Column width="15%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>loteQty}"/>
                     </Column>
-                    <Column width="15%" hAlign="Left" vAlign="Middle" >
-                        <Text text="{i18n>loteQty}" />
+                    <Column width="15%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>secuenciaCode}"/>
                     </Column>
                     <Column width="60%" hAlign="Left" vAlign="Middle">
-                        <Text text="{i18n>Value}" visible="false" />
+                        <Text text="{i18n>Value}" visible="false"/>
                     </Column>
                     <Column width="10%" hAlign="Center" vAlign="Middle">
                         <Text text="{i18n>ActionModify}" visible="false"/>
                     </Column>
                     <Column width="10%" hAlign="Center" vAlign="Middle">
-                        <Text text="{i18n>ActionDelete}" visible="false" />
+                        <Text text="{i18n>ActionDelete}" visible="false"/>
                     </Column>
                 </columns>
                 <items>
                     <ColumnListItem vAlign="Middle">
                         <cells>
-                            <Text text="{attribute}" />
-                            <Input value="{path: 'value', formatter: '.formatter.getMaterial'}" enabled="false" />
-                            <Input value="{path: 'value', formatter: '.formatter.getLote'}" enabled="false" />
-                            <Input value="{path: 'value', formatter: '.formatter.getSecuencia'}" enabled="false" />
-                            <Input value="{loteQty}" enabled="false" />
+                            <Text text="{attribute}"/>
+                            <Input value="{path: 'value', formatter: '.formatter.getMaterial'}" enabled="false"/>
+                            <Input value="{path: 'value', formatter: '.formatter.getLote'}" enabled="false"/>
+                            <!-- <Input value="{loteQty}" enabled="false"/> -->
+                            <ObjectAttribute text="{loteQty} {loteUom}" />
+                            <Input value="{path: 'value', formatter: '.formatter.getSecuencia'}" enabled="false"/>
                             <Input value="{value}" enabled="false" visible="false"/>
-                            <ndc:BarcodeScannerButton  
+                            <ndc:BarcodeScannerButton
                                 scanSuccess=".onScanSlotSuccess"
                                 scanFail=".onScanError"
-                                dialogTitle="{i18n>BarcodeScanner}"
-                            />
+                                dialogTitle="{i18n>BarcodeScanner}"/>
                             <Button icon="sap-icon://delete" press=".onDeleteSlot" type="Reject"/>
                         </cells>
                     </ColumnListItem>
                 </items>
             </Table>
-            </HBox>      
-    </Panel>	
-  
+        </HBox>
+
+        <!-- ═══ TABLA SOLERA (oculta por defecto) ═══ -->
+        <HBox id="containerSol" width="97%" justifyContent="Center"
+              class="sapUiSmallMarginTop sapUiSmallMarginBeginEnd" visible="false">
+            <Table id="idSlotTableSol" items="{/ITEMS}"
+                   class="sapUiSmallMarginTop" width="100%" alternateRowColors="true">
+                <headerToolbar>
+                    <Toolbar>
+                        <Title text="{i18n>solera}"/>
+                        <ToolbarSpacer/>
+                        <Button text="{i18n>lotesAsignados}" press=".onPressOpenFragmentList"
+                                icon="sap-icon://list" class="sapUiSmallMarginEnd">
+                            <customData>
+                                <core:CustomData key="grupo" value="SOL"/>
+                            </customData>
+                        </Button>
+                        <Button text="{i18n>refresh}" press=".onPressRefresh"
+                                width="100px" icon="sap-icon://refresh" type="Attention"
+                                class="sapUiSmallMarginBeginEnd"/>
+                        <Button text="{i18n>clear}" press=".onPressClear"
+                                width="100px" icon="sap-icon://clear-all" type="Reject"
+                                class="sapUiSmallMarginBeginEnd"/>
+                    </Toolbar>
+                </headerToolbar>
+                <columns>
+                    <Column width="30%" hAlign="Left" vAlign="Middle" visible="false">
+                        <Text text="{i18n>Slot}" visible="false"/>
+                    </Column>
+                    <Column width="30%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>materialCode}"/>
+                    </Column>
+                    <Column width="30%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>loteCode}"/>
+                    </Column>
+                    <Column width="15%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>loteQty}"/>
+                    </Column>
+                    <Column width="15%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>secuenciaCode}"/>
+                    </Column>
+                    <Column width="60%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>Value}" visible="false"/>
+                    </Column>
+                    <Column width="10%" hAlign="Center" vAlign="Middle">
+                        <Text text="{i18n>ActionModify}" visible="false"/>
+                    </Column>
+                    <Column width="10%" hAlign="Center" vAlign="Middle">
+                        <Text text="{i18n>ActionDelete}" visible="false"/>
+                    </Column>
+                </columns>
+                <items>
+                    <ColumnListItem vAlign="Middle">
+                        <cells>
+                            <Text text="{attribute}"/>
+                            <Input value="{path: 'value', formatter: '.formatter.getMaterial'}" enabled="false"/>
+                            <Input value="{path: 'value', formatter: '.formatter.getLote'}" enabled="false"/>
+                            <!-- <Input value="{loteQty}" enabled="false"/> -->
+                            <ObjectAttribute text="{loteQty} {loteUom}" />
+                            <Input value="{path: 'value', formatter: '.formatter.getSecuencia'}" enabled="false"/>
+                            <Input value="{value}" enabled="false" visible="false"/>
+                            <ndc:BarcodeScannerButton
+                                scanSuccess=".onScanSlotSuccess"
+                                scanFail=".onScanError"
+                                dialogTitle="{i18n>BarcodeScanner}"/>
+                            <Button icon="sap-icon://delete" press=".onDeleteSlot" type="Reject"/>
+                        </cells>
+                    </ColumnListItem>
+                </items>
+            </Table>
+        </HBox>
+
+    </Panel>
+
 </mvc:View>

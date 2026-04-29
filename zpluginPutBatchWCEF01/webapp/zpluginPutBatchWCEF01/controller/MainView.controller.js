@@ -21,8 +21,9 @@ sap.ui.define([
         onInit: function () {
             PluginViewController.prototype.onInit.apply(this, arguments);
             this.oScanInput = this.byId("scanInput");
-            this.iSecuenciaCounter = 0;  // Contador de secuencia para cada escaneo
-            this.sAcActivity = "";       // Guardar valor AC_ACTIVITY del puesto
+            this._oScanDebounceTimer = null; // Timer para auto-submit al escanear con pistola física
+            this.iSecuenciaCounter = 0;    // Contador global compartido entre ambas tablas (Slot001, Slot002...)
+            this.sAcActivity = "";         // Guardar valor AC_ACTIVITY del puesto
 
             // Modelo "orderSummary" 
             const oOrderSummaryModel = new JSONModel({
@@ -47,112 +48,198 @@ sap.ui.define([
         onGetCustomValues: function () {
             const oView = this.getView(),
                 oSapApi = this.getPublicApiRestDataSourceUri(),
-                oTable = oView.byId("idSlotTable"),
                 oPODParams = this.Commons.getPODParams(this.getOwnerComponent()),
                 url = oSapApi + this.ApiPaths.WORKCENTERS,
-
                 oParams = {
                     plant: oPODParams.PLANT_ID,
                     workCenter: oPODParams.WORK_CENTER
                 };
 
             this.ajaxGetRequest(url, oParams, function (oRes) {
-                // Tomamos el primer objeto del array
                 const oData = Array.isArray(oRes) ? oRes[0] : oRes;
 
                 if (!oData || !oData.customValues) {
-                    console.error("No se encontraron customValues en la respuesta");
+                    console.error(this.getView().getModel("i18n").getResourceBundle().getText("noCustomValuesEnRespuesta"));
                     return;
                 }
 
                 const aCustomValues = oData.customValues;
 
-                const cantidadSlot = aCustomValues.find((element) => element.attribute == "SLOTQTY") || { value: "0" };
-                const tipoSlot = aCustomValues.find((element) => element.attribute == "SLOTTIPO") || { value: "" };
-                const acActivity = aCustomValues.find((element) => element.attribute == "AC_ACTIVITY");
+                // ── AC_ACTIVITY ───────────────────────────────────────────────
+                const acActivity = aCustomValues.find(el => el.attribute === "AC_ACTIVITY");
+                this.sAcActivity = acActivity ? (acActivity.value || "") : "";
 
-                // Guardar AC_ACTIVITY en la variable de instancia
-                if (acActivity) {
-                    this.sAcActivity = acActivity.value || "";
-                } else {
-                    this.sAcActivity = "";
-                }
-                const aSlots = aCustomValues.filter(item =>
-                    item.attribute.startsWith("SLOT") &&
-                    item.attribute !== "SLOTQTY" &&
-                    item.attribute !== "SLOTTIPO"
+                // ── SLOTTIPO (global) ─────────────────────────────────────────
+                const tipoSlot = aCustomValues.find(el => el.attribute === "SLOTTIPO") || { value: "" };
+                const oSlotTypeInput = oView.byId("slotType");
+                if (oSlotTypeInput) { oSlotTypeInput.setValue(tipoSlot.value || ""); }
+
+                // ── SLOTQTY_SOL y SLOTQTY_ALM ──────────────────────────────────────────
+                const cvSlotQtySol = aCustomValues.find(el => el.attribute === "SLOTQTY_SOL") || { value: "0" };
+                const cvSlotQtyAlm = aCustomValues.find(el => el.attribute === "SLOTQTY_ALM") || { value: "0" };
+                const iQtySol = parseInt(cvSlotQtySol.value || "0", 10);
+                const iQtyAlm = parseInt(cvSlotQtyAlm.value || "0", 10);
+                const iTotalSlots = iQtySol + iQtyAlm;
+
+                const oSlotQtySolInput = oView.byId("slotQty_sol");
+                if (oSlotQtySolInput) { oSlotQtySolInput.setValue(cvSlotQtySol.value || "0"); }
+                const oSlotQtyAlmInput = oView.byId("slotQty_alm");
+                if (oSlotQtyAlmInput) { oSlotQtyAlmInput.setValue(cvSlotQtyAlm.value || "0"); }
+
+                // ── Pool global de slots: Slot001...SlotN (compartido entre ambas tablas) ──
+                const aAllSlots = this._getAllSlotsAsArray(aCustomValues, iTotalSlots);
+                const oRouted = this._routeSlotsToTables(aAllSlots, iQtySol, iQtyAlm);
+
+                const oTableSol = oView.byId("idSlotTableSol");
+                const oTableAlm = oView.byId("idSlotTableAlm");
+                if (oTableSol) { oTableSol.setModel(new sap.ui.model.json.JSONModel({ ITEMS: oRouted.slotsSol })); }
+                if (oTableAlm) { oTableAlm.setModel(new sap.ui.model.json.JSONModel({ ITEMS: oRouted.slotsAlm })); }
+
+                // ── Sincronizar contador global único ───────────────────────────────────
+                const aSlotsConValor = aAllSlots.filter(s => s.value && s.value.trim() !== "");
+                this.iSecuenciaCounter = aSlotsConValor.length === 0 ? 0 : Math.max(...aSlotsConValor
+                    .map(s => parseInt((s.value || "").split('!')[2] || 0, 10))
                 );
 
-                //  Rellenar slots faltantes según SLOTQTY
-                const iSlotQty = parseInt((cantidadSlot && cantidadSlot.value) || "0", 10);
-                let aSlotsFixed = [...aSlots];
-
-                // Caso 1 :hay más slots con valor que los permitidos -> eliminar y actualizar en vacio
-                if (aSlotsFixed.length > iSlotQty) {
-                    // Nos quedamos solo con los primeros 
-                    aSlotsFixed = aSlotsFixed.slice(0, iSlotQty);
-
-                    // Los que se eliminaron, hay que vaciarlos en el update
-                    const aSobran = aSlots.slice(iSlotQty);
-                    aSobran.forEach(slot => {
-                        slot.value = "";  // se vacían para mandar update
-                    });
-
-                    // Mandar update inmediato para limpiar los sobrantes
-                    const oParamsUpdate = {
-                        inCustomValues: aCustomValues.map(item => {
-                            // si está en los que sobran, value vacío
-                            const sobrante = aSobran.find(s => s.attribute === item.attribute);
-                            return sobrante ? { attribute: item.attribute, value: "" } : item;
-                        }),
-                        inPlant: oPODParams.PLANT_ID,
-                        inWorkCenter: oPODParams.WORK_CENTER
-                    };
-
-                    this.setCustomValuesPp(oParamsUpdate, oSapApi).then(() => {
-                        // Lotes sobrantes eliminados
-                    });
-                }
-                // Caso 2: hay menos slots que SLOTQTY -> rellenar vacíos
-                for (let i = aSlotsFixed.length + 1; i <= iSlotQty; i++) {
-                    aSlotsFixed.push({
-                        attribute: "SLOT" + i.toString().padStart(3, "0"),
-                        value: "" // valor vacío para que después lo puedan llenar
-                    });
-                }
-
-                // Setear los datos en la tabla
-                oTable.setModel(new sap.ui.model.json.JSONModel({ ITEMS: aSlotsFixed }));
-                this._updateOrderSummaryScannedQty(aSlotsFixed);
-
-                // Setear los valores en los inputs
-                const oSlotQtyInput = oView.byId("slotQty");
-                const oSlotTypeInput = oView.byId("slotType");
-                if (oSlotQtyInput) {
-                    oSlotQtyInput.setValue(cantidadSlot.value || "0");
-                }
-                if (oSlotTypeInput) {
-                    oSlotTypeInput.setValue(tipoSlot.value || "");
-                }
-
-                // Resetear o sincronizar secuencia
-                const iSlotTotal = aSlotsFixed.filter(slot => slot.value && slot.value.trim() !== "").length;
-                if (iSlotTotal === 0) {
-                    this.iSecuenciaCounter = 0;
-                } else {
-                    // Si hay slots, obtener el máximo número de secuencia para continuar desde ahí
-                    const maxSecuencia = Math.max(...aSlotsFixed
-                        .filter(slot => slot.value)
-                        .map(slot => {
-                            const parts = (slot.value || "").split('!');
-                            return parseInt(parts[2] || 0);
-                        })
-                    );
-                    this.iSecuenciaCounter = maxSecuencia;
-                }
+                // Actualizar cantidades escaneadas por material en el resumen
+                this._updateOrderSummaryScannedQty(oRouted.slotsSol, oRouted.slotsAlm);
 
             }.bind(this));
         },
+
+        /**
+         * Construye el array de slots normalizado para un grupo (SOL o ALM).
+         * Caso 1: más slots que SLOTQTY → recorta y envía PP para vaciar sobrantes.
+         * Caso 2: menos slots que SLOTQTY → rellena con entradas vacías.
+         * @param {Array}  aSlots          - CVs del grupo (ya filtrados por prefijo)
+         * @param {number} iSlotQty        - Cantidad objetivo (SLOTQTY_SOL o SLOTQTY_ALM)
+         * @param {string} sPrefix         - Prefijo de atributo: "SSLO" o "ALOM"
+         * @param {Array}  aAllCustomValues - Array completo de CVs (para merge en PP)
+         * @param {string} oSapApi         - Base REST URL
+         * @param {object} oPODParams      - Parámetros POD
+         * @returns {Array}
+         */
+        _buildSlotsFixed: function (aSlots, iSlotQty, sPrefix, aAllCustomValues, oSapApi, oPODParams) {
+            let aSlotsFixed = [...aSlots];
+
+            // Caso 1: sobrantes → vaciar en backend
+            if (aSlotsFixed.length > iSlotQty) {
+                aSlotsFixed = aSlotsFixed.slice(0, iSlotQty);
+                const aSobran = aSlots.slice(iSlotQty);
+
+                const oParamsUpdate = {
+                    inCustomValues: aAllCustomValues.map(function (item) {
+                        const sobrante = aSobran.find(s => s.attribute === item.attribute);
+                        return sobrante ? { attribute: item.attribute, value: "" } : item;
+                    }),
+                    inPlant: oPODParams.PLANT_ID,
+                    inWorkCenter: oPODParams.WORK_CENTER
+                };
+                this.setCustomValuesPp(oParamsUpdate, oSapApi);
+            }
+
+            // Caso 2: faltan slots → rellenar vacíos
+            for (let i = aSlotsFixed.length + 1; i <= iSlotQty; i++) {
+                aSlotsFixed.push({
+                    attribute: sPrefix + i.toString().padStart(3, "0"),
+                    value: ""
+                });
+            }
+
+            return aSlotsFixed;
+        },
+
+        /**
+         * Construye el array global de slots Slot001...SlotN desde los custom values del backend.
+         * @param {Array}  aCustomValues - Array completo de custom values
+         * @param {number} iTotalSlots   - Total de slots (SLOTQTY_SOL + SLOTQTY_ALM)
+         * @returns {Array} Array con { attribute, value, loteQty, loteUom }
+         */
+        _getAllSlotsAsArray: function (aCustomValues, iTotalSlots) {
+            var aAll = [];
+            for (var i = 1; i <= iTotalSlots; i++) {
+                var sAttr = "SLOT" + String(i).padStart(3, "0");
+                var oCv = aCustomValues.find(function (c) { return c.attribute === sAttr; });
+                aAll.push({ attribute: sAttr, value: (oCv && oCv.value) || "", loteQty: "", loteUom: "" });
+            }
+            return aAll;
+        },
+
+        /**
+         * Distribuye el pool global de slots a los modelos de cada tabla (Alambre / Solera).
+         * Los slots con valor se rutan por material; los vacíos rellenan capacidad.
+         * @param {Array}  aAllSlots - Array global Slot001...SlotN
+         * @param {number} iQtySol   - Capacidad tabla Solera
+         * @param {number} iQtyAlm   - Capacidad tabla Alambre
+         * @returns {{ slotsSol: Array, slotsAlm: Array }}
+         */
+        _routeSlotsToTables: function (aAllSlots, iQtySol, iQtyAlm) {
+            var oOrderSummaryModel = this.getView().getModel("orderSummary");
+            var sMatAlm = oOrderSummaryModel ? (oOrderSummaryModel.getProperty("/material")  || "").toUpperCase() : "";
+            var sMatSol = oOrderSummaryModel ? (oOrderSummaryModel.getProperty("/material2") || "").toUpperCase() : "";
+
+            var aFilledAlm = [], aFilledSol = [], aEmpty = [];
+
+            aAllSlots.forEach(function (slot) {
+                if (!slot.value || slot.value.trim() === "") {
+                    aEmpty.push(slot);
+                } else {
+                    var sMat = (slot.value.split('!')[0] || "").toUpperCase();
+                    if (sMatAlm && sMat === sMatAlm) {
+                        aFilledAlm.push({ attribute: slot.attribute, value: slot.value, loteQty: slot.loteQty || "", loteUom: slot.loteUom || "" });
+                    } else if (sMatSol && sMat === sMatSol) {
+                        aFilledSol.push({ attribute: slot.attribute, value: slot.value, loteQty: slot.loteQty || "", loteUom: slot.loteUom || "" });
+                    } else {
+                        aEmpty.push(slot);
+                    }
+                }
+            });
+
+            // Rellenar ALM hasta capacidad con slots vacíos del pool
+            var aSlotsAlm = aFilledAlm.slice();
+            var ei = 0;
+            while (aSlotsAlm.length < iQtyAlm && ei < aEmpty.length) {
+                aSlotsAlm.push({ attribute: aEmpty[ei].attribute, value: "", loteQty: "", loteUom: "" });
+                ei++;
+            }
+
+            // Rellenar SOL con los vacíos restantes
+            var aSlotsSol = aFilledSol.slice();
+            while (aSlotsSol.length < iQtySol && ei < aEmpty.length) {
+                aSlotsSol.push({ attribute: aEmpty[ei].attribute, value: "", loteQty: "", loteUom: "" });
+                ei++;
+            }
+
+            return { slotsSol: aSlotsSol, slotsAlm: aSlotsAlm };
+        },
+
+        /**
+         * Devuelve la key activa del toggle: "SOL" o "ALM".
+         */
+        _getActiveTableKey: function () {
+            var oToggle = this.byId("tableToggle");
+            return oToggle ? oToggle.getSelectedKey() : "SOL";
+        },
+
+        /**
+         * Devuelve el control Table correspondiente al toggle activo.
+         */
+        _getActiveTable: function () {
+            return this._getActiveTableKey() === "ALM"
+                ? this.byId("idSlotTableAlm")
+                : this.byId("idSlotTableSol");
+        },
+
+        /**
+         * Handler del SegmentedButton — muestra el contenedor activo y oculta el otro.
+         */
+        onToggleTable: function () {
+            var oView = this.getView();
+            var sKey = this._getActiveTableKey();
+            oView.byId("containerSol").setVisible(sKey === "SOL");
+            oView.byId("containerAlm").setVisible(sKey === "ALM");
+        },
+
         onBarcodeSubmit: function () {
             const oView = this.getView();
             const oInput = oView.byId("scanInput");
@@ -161,25 +248,13 @@ sap.ui.define([
             var oBundle = this.getView().getModel("i18n").getResourceBundle();
 
             if (!sBarcode) {
-                return; // no hacer nada si está vacío
+                return;
             }
 
-            const oTable = oView.byId("idSlotTable");
-            const oModel = oTable.getModel();
-            const aItems = oModel.getProperty("/ITEMS") || [];
-
-            const iSlotsConValor = aItems.filter(slot => slot.value && slot.value.trim() !== "").length;
-            if (iSlotsConValor === 0) {
-                this.iSecuenciaCounter = 0;
-            }
-
-            //comparacion del lote ingresado 
+            // La detección de tabla activa y la validación de duplicados
+            // se hacen en _ejecutarUpdate / _procesarSlotValidado (paso 4),
+            // ya con enrutamiento automático por material.
             const sNormalizado = sBarcode.toUpperCase();
-            //busca si es igual a uno de los items 
-            const oExiste = aItems.find(Item => {
-                return (Item.value || "").toString().trim().toUpperCase() === sNormalizado;
-            });
-
             const partsBarcode = sNormalizado.split('!');
 
             if (partsBarcode.length < 2 || !partsBarcode[0] || !partsBarcode[1]) {
@@ -194,24 +269,30 @@ sap.ui.define([
 
         },
         /**
-         * Refresca las cantidades (loteQty) de todos los slots con valor,
-         * consultando getReservas para cada lote escaneado. Solo lectura, no persiste nada.
+         * Refresca las cantidades (loteQty) de los slots escaneados en AMBAS tablas (Sol + Alm).
+         * Consulta la API de reservas para cada lote con valor y actualiza ambos modelos.
+         * Independiente del tab visible en el toggle.
          */
         onPressRefresh: function () {
             var oView = this.getView();
-            var oTable = oView.byId("idSlotTable");
-            var oModel = oTable.getModel();
-            var aItems = oModel.getProperty("/ITEMS") || [];
             var oBundle = oView.getModel("i18n").getResourceBundle();
             var oPODParams = this.Commons.getPODParams(this.getOwnerComponent());
             var mandante = this.getConfiguration().mandante;
             var oSapApi = this.getPublicApiRestDataSourceUri();
             var urlLote = oSapApi + this.ApiPaths.getReservas;
 
-            // Filtrar solo slots con valor
-            var aSlotsConValor = aItems.filter(function (slot) {
-                return slot.value && slot.value.trim() !== "";
-            });
+            var oTableSol = oView.byId("idSlotTableSol");
+            var oTableAlm = oView.byId("idSlotTableAlm");
+            var oModelSol = oTableSol ? oTableSol.getModel() : null;
+            var oModelAlm = oTableAlm ? oTableAlm.getModel() : null;
+
+            var aItemsSol = (oModelSol && oModelSol.getProperty("/ITEMS")) || [];
+            var aItemsAlm = (oModelAlm && oModelAlm.getProperty("/ITEMS")) || [];
+
+            // Recopilar todos los slots con valor de ambas tablas
+            var aSlotsConValor = aItemsSol
+                .filter(function (s) { return s.value && s.value.trim() !== ""; })
+                .concat(aItemsAlm.filter(function (s) { return s.value && s.value.trim() !== ""; }));
 
             if (aSlotsConValor.length === 0) {
                 sap.m.MessageToast.show(oBundle.getText("sinLotesParaRefrescar"));
@@ -220,7 +301,7 @@ sap.ui.define([
 
             oView.byId("idPluginPanel").setBusy(true);
 
-            // Crear una promesa por cada slot para consultar su cantidad
+            // Una promesa por cada slot (ambas tablas)
             var aPromises = aSlotsConValor.map(function (slot) {
                 var parts = slot.value.split('!');
                 var sMaterial = (parts[0] || "").trim();
@@ -239,10 +320,10 @@ sap.ui.define([
                     this.ajaxPostRequest(urlLote, inParams,
                         function (oRes) {
                             slot.loteQty = this._formatLoteQty(oRes.outCantidadLote);
+                            slot.loteUom = oRes.outOUMLote || "";
                             resolve({ slot: slot, ok: true });
                         }.bind(this),
                         function () {
-                            // Si falla un lote individual, no bloquear los demás
                             resolve({ slot: slot, ok: false });
                         }.bind(this)
                     );
@@ -251,8 +332,15 @@ sap.ui.define([
 
             Promise.all(aPromises).then(function (aResults) {
                 oView.byId("idPluginPanel").setBusy(false);
-                oModel.refresh(true);
-                this._updateOrderSummaryScannedQty(aItems);
+
+                // Refrescar ambos modelos (los objetos slot están mutados in-place)
+                if (oModelSol) { oModelSol.refresh(true); }
+                if (oModelAlm) { oModelAlm.refresh(true); }
+
+                // Recalcular summary con datos actualizados de ambas tablas
+                var aFinalSol = (oModelSol && oModelSol.getProperty("/ITEMS")) || [];
+                var aFinalAlm = (oModelAlm && oModelAlm.getProperty("/ITEMS")) || [];
+                this._updateOrderSummaryScannedQty(aFinalSol, aFinalAlm);
 
                 var iFailed = aResults.filter(function (r) { return !r.ok; }).length;
                 if (iFailed > 0) {
@@ -271,87 +359,84 @@ sap.ui.define([
         },
         clearModel: function () {
             const oView = this.getView();
-            const oTable = oView.byId("idSlotTable");
-            const oScanInput = oView.byId("scanInput");
-            const oModel = oTable.getModel();
+            const oBundle = oView.getModel("i18n").getResourceBundle();
             const oPODParams = this.Commons.getPODParams(this.getOwnerComponent());
-            const oBundle = this.getView().getModel("i18n").getResourceBundle();
+            const oScanInput = oView.byId("scanInput");
+            const oSapApi = this.getPublicApiRestDataSourceUri();
 
-            //obtener el modelo actual de la tabla 
-            const aItems = oModel.getProperty("/ITEMS") || [];
-            if (aItems.length === 0) {
+            const oTableSol = oView.byId("idSlotTableSol");
+            const oTableAlm = oView.byId("idSlotTableAlm");
+            const oModelSol = oTableSol ? oTableSol.getModel() : null;
+            const oModelAlm = oTableAlm ? oTableAlm.getModel() : null;
+
+            const aItemsSol = (oModelSol && oModelSol.getProperty("/ITEMS")) || [];
+            const aItemsAlm = (oModelAlm && oModelAlm.getProperty("/ITEMS")) || [];
+
+            if (aItemsSol.length === 0 && aItemsAlm.length === 0) {
                 sap.m.MessageToast.show(oBundle.getText("noDataToClear"));
                 return;
             }
-            //vaciar los valores manteniendo el attributo
-            aItems.forEach(item => {
-                item.value = "";  //se vacia solo el valor 
-                item.loteQty = "";
-            });
 
-            //se acctualiza el modelo de la vista
-            oModel.setProperty("/ITEMS", aItems);
-            oModel.refresh(true);
-            this._updateOrderSummaryScannedQty(aItems);
+            // Vaciar todos los valores de ambas tablas en memoria
+            aItemsSol.forEach(function (item) { item.value = ""; item.loteQty = ""; item.loteUom = ""; });
+            aItemsAlm.forEach(function (item) { item.value = ""; item.loteQty = ""; item.loteUom = ""; });
+
+            if (oModelSol) { oModelSol.setProperty("/ITEMS", aItemsSol); oModelSol.refresh(true); }
+            if (oModelAlm) { oModelAlm.setProperty("/ITEMS", aItemsAlm); oModelAlm.refresh(true); }
+
+            // Resetear contador global único
+            this.iSecuenciaCounter = 0;
+
+            // Recalcular summary (ambas cantidades a 0)
+            this._updateOrderSummaryScannedQty(aItemsSol, aItemsAlm);
+
             oScanInput.setValue("");
             oScanInput.focus();
 
-            // Resetear secuencia cuando se limpian los datos
-            this.iSecuenciaCounter = 0;
-
-            //se prepara los datos para hacer el update 
+            // Construir aEdited solo con los slots vaciados.
+            // SLOTQTY_SOL y SLOTQTY_ALM se excluyen intencionalmente para que el merge
+            // conserve sus valores originales del backend (siempre 10 para este puesto).
             const slotTipo = oView.byId("slotType") ? oView.byId("slotType").getValue() : "";
-            const slotQty = oView.byId("slotQty") ? oView.byId("slotQty").getValue() : "";
 
             const aEdited = [
-                { attribute: "SLOTTIPO", value: slotTipo },
-                { attribute: "SLOTQTY", value: slotQty },
-                ...aItems.map(slot => ({ attribute: slot.attribute, value: slot.value }))
+                { attribute: "SLOTTIPO", value: slotTipo }
             ]
+                .concat(aItemsSol.map(function (slot) { return { attribute: slot.attribute, value: "" }; }))
+                .concat(aItemsAlm.map(function (slot) { return { attribute: slot.attribute, value: "" }; }));
 
-            // Llama a la API para obtener los originales
-            const oSapApi = this.getPublicApiRestDataSourceUri();
-            const sParams = {
-                plant: oPODParams.PLANT_ID,
-                workCenter: oPODParams.WORK_CENTER
-            };
-            //llamado a la API 
-            this.getWorkCenterCustomValues(sParams, oSapApi).then(oOriginalRes => {
-                const aOriginal = oOriginalRes.customValues || [];
+            // Fetch originales, merge y persistir con un único POST
+            const sParams = { plant: oPODParams.PLANT_ID, workCenter: oPODParams.WORK_CENTER };
+
+            this.getWorkCenterCustomValues(sParams, oSapApi).then(function (oOriginalRes) {
+                const aOriginal = (oOriginalRes && oOriginalRes.customValues) || [];
                 const aEditMap = {};
+                aEdited.forEach(function (item) { aEditMap[item.attribute] = item.value; });
 
-                //se crea el mapa de los valores editados (los vacioos)
-                aEdited.forEach(item => {
-                    aEditMap[item.attribute] = item.value;  //-----------------------------------------------------------------------------
-                })
-                //combinar los originales con los editados
-                const aCustomValuesFinal = aOriginal.map(item => ({
-                    attribute: item.attribute,
-                    value: aEditMap.hasOwnProperty(item.attribute) ? aEditMap[item.attribute] : item.value
-                }));
-                // Agregar los que no estaban en el original, los nuevos en este caso los vacios 
-                for (const key in aEditMap) {
-                    if (!aCustomValuesFinal.find(i => i.attribute === key)) {
+                const aCustomValuesFinal = aOriginal.map(function (item) {
+                    return {
+                        attribute: item.attribute,
+                        value: aEditMap.hasOwnProperty(item.attribute) ? aEditMap[item.attribute] : item.value
+                    };
+                });
+                for (var key in aEditMap) {
+                    if (!aCustomValuesFinal.find(function (i) { return i.attribute === key; })) {
                         aCustomValuesFinal.push({ attribute: key, value: aEditMap[key] });
                     }
                 }
-                //llamar al pp para actualizar los customValues de WC
+
                 this.setCustomValuesPp({
                     inCustomValues: aCustomValuesFinal,
                     inPlant: oPODParams.PLANT_ID,
                     inWorkCenter: oPODParams.WORK_CENTER
-                }, oSapApi).then(() => {
+                }, oSapApi).then(function () {
                     sap.m.MessageToast.show(oBundle.getText("dataClearedSuccess"));
-                    // sap.m.MessageToast.show("Lote actualizado correctamente");
-                }).catch(() => {
+                }).catch(function () {
                     sap.m.MessageToast.show(oBundle.getText("errorClearing"));
-                    // En caso de error, recargar los datos originales
                     this.onGetCustomValues();
-                });
-            }).catch(() => {
+                }.bind(this));
+            }.bind(this)).catch(function () {
                 sap.m.MessageToast.show(oBundle.getText("errorObtenerDatosOriginales"));
             });
-
         },
         /**
         * Llamada al Pp(getReservas) para obtener los lotes en Reserva y hacer validacion de material
@@ -474,14 +559,15 @@ sap.ui.define([
 
                             if (bEsValido) {
                                 const sCantidadLote = this._formatLoteQty(oResponseData.outCantidadLote);
+                                const sUomLote =  oResponseData.outOUMLote;
                                 // Detectar de dónde vino el escaneo
                                 if (!this._slotContext) {
                                     // Viene del input superior → buscar slot vacío
-                                    this._ejecutarUpdate(sCantidadLote);
+                                    this._ejecutarUpdate(sCantidadLote, sUomLote);
                                 } else {
                                     // Viene del botón por fila → actualizar ese slot
                                     this._slotContext.loteQty = sCantidadLote;
-                                    this._procesarSlotValidado(sCantidadLote);
+                                    this._procesarSlotValidado(sCantidadLote, sUomLote);
                                 }
                             } else {
                                 sap.m.MessageToast.show(oBundle.getText("loteNoValido"));
@@ -529,31 +615,32 @@ sap.ui.define([
             return isNaN(n) ? "" : n.toFixed(2);
         },
         /**
-         * Refresca el modelo de la tabla consultando los customValues del puesto de trabajo desde el backend.
-         * 
-         * Este método garantiza que ANTES de cualquier operación de escritura (_ejecutarUpdate,
-         * _procesarSlotValidado, onDeleteSlot), la tabla refleje el estado REAL del backend.
-         * @returns {Promise<{slots: Array, customValues: Array}|null>} null si hubo error
+         * Refresca los slots de un GRUPO (SOL o ALM) desde el backend.
+         * Paso 6 reescribirá esto para manejar los dos grupos en paralelo.
+         * @param {"SOL"|"ALM"} sGrupo - Grupo a refrescar (default "SOL")
+         * @returns {Promise<{slots: Array, customValues: Array}|null>}
          */
-        _refreshSlotsFromBackend: function () {
+        _refreshSlotsFromBackend: function (sGrupo) {
+            // sGrupo mantenido por compatibilidad; ahora siempre refresca TODOS los slots globales
             var oView = this.getView();
             var oSapApi = this.getPublicApiRestDataSourceUri();
-            var oTable = oView.byId("idSlotTable");
             var oPODParams = this.Commons.getPODParams(this.getOwnerComponent());
             var sParams = {
                 plant: oPODParams.PLANT_ID,
                 workCenter: oPODParams.WORK_CENTER
             };
 
-            // Preservar loteQty del modelo actual antes de sobreescribir
-            var oCurrentModel = oTable.getModel();
-            var aCurrentItems = (oCurrentModel && oCurrentModel.getProperty("/ITEMS")) || [];
+            // Preservar loteQty/loteUom de AMBOS modelos antes de sobreescribir
+            var oTableSolR = oView.byId("idSlotTableSol");
+            var oTableAlmR = oView.byId("idSlotTableAlm");
+            var aCurrentSolR = ((oTableSolR && oTableSolR.getModel()) ? oTableSolR.getModel().getProperty("/ITEMS") : []) || [];
+            var aCurrentAlmR = ((oTableAlmR && oTableAlmR.getModel()) ? oTableAlmR.getModel().getProperty("/ITEMS") : []) || [];
             var oLoteQtyMap = {};
-            aCurrentItems.forEach(function (item) {
-                if (item.value && item.loteQty) {
+            [].concat(aCurrentSolR, aCurrentAlmR).forEach(function (item) {
+                if (item.value && (item.loteQty || item.loteUom)) {
                     var parts = item.value.split('!');
                     var key = parts.slice(0, 2).join('!').toUpperCase();
-                    oLoteQtyMap[key] = item.loteQty;
+                    oLoteQtyMap[key] = { loteQty: item.loteQty || "", loteUom: item.loteUom || "" };
                 }
             });
 
@@ -561,143 +648,160 @@ sap.ui.define([
                 if (!oData || oData === "Error" || !oData.customValues) {
                     return null;
                 }
-
                 var aCustomValues = oData.customValues;
-                var cantidadSlot = aCustomValues.find(function (el) {
-                    return el.attribute === "SLOTQTY";
-                }) || { value: "0" };
 
-                var aSlots = aCustomValues.filter(function (item) {
-                    return item.attribute.startsWith("SLOT") &&
-                        item.attribute !== "SLOTQTY" &&
-                        item.attribute !== "SLOTTIPO";
-                });
+                var cvQtySol = aCustomValues.find(function (el) { return el.attribute === "SLOTQTY_SOL"; }) || { value: "0" };
+                var cvQtyAlm = aCustomValues.find(function (el) { return el.attribute === "SLOTQTY_ALM"; }) || { value: "0" };
+                var iQtySol = parseInt(cvQtySol.value || "0", 10);
+                var iQtyAlm = parseInt(cvQtyAlm.value || "0", 10);
+                var iTotalSlots = iQtySol + iQtyAlm;
 
-                var iSlotQty = parseInt((cantidadSlot && cantidadSlot.value) || "0", 10);
-                var aSlotsFixed = aSlots.slice();
-
-                if (aSlotsFixed.length > iSlotQty) {
-                    aSlotsFixed = aSlotsFixed.slice(0, iSlotQty);
-                }
-
-                for (var i = aSlotsFixed.length + 1; i <= iSlotQty; i++) {
-                    aSlotsFixed.push({
-                        attribute: "SLOT" + i.toString().padStart(3, "0"),
-                        value: ""
-                    });
-                }
-
-                // Restaurar loteQty desde el modelo anterior (matching por material!lote)
-                aSlotsFixed.forEach(function (slot) {
+                // Construir pool global Slot001...SlotN y restaurar loteQty/loteUom
+                var aAllSlots = this._getAllSlotsAsArray(aCustomValues, iTotalSlots);
+                aAllSlots.forEach(function (slot) {
                     if (slot.value) {
                         var parts = slot.value.split('!');
                         var key = parts.slice(0, 2).join('!').toUpperCase();
-                        slot.loteQty = oLoteQtyMap[key] || "";
-                    } else {
-                        slot.loteQty = "";
+                        var oLQ = oLoteQtyMap[key];
+                        slot.loteQty = (oLQ && oLQ.loteQty) || "";
+                        slot.loteUom = (oLQ && oLQ.loteUom) || "";
                     }
                 });
 
-                // Actualizar tabla con datos frescos
-                oTable.setModel(new sap.ui.model.json.JSONModel({ ITEMS: aSlotsFixed }));
-                this._updateOrderSummaryScannedQty(aSlotsFixed);
+                // Rutear a tablas y actualizar AMBOS modelos
+                var oRouted = this._routeSlotsToTables(aAllSlots, iQtySol, iQtyAlm);
+                if (oTableSolR) { oTableSolR.setModel(new sap.ui.model.json.JSONModel({ ITEMS: oRouted.slotsSol })); }
+                if (oTableAlmR) { oTableAlmR.setModel(new sap.ui.model.json.JSONModel({ ITEMS: oRouted.slotsAlm })); }
 
-                // Resincronizar contador de secuencia
-                var iSlotsConValor = aSlotsFixed.filter(function (s) {
-                    return s.value && s.value.trim() !== "";
-                }).length;
-                if (iSlotsConValor === 0) {
-                    this.iSecuenciaCounter = 0;
-                } else {
-                    var maxSecuencia = Math.max.apply(null, aSlotsFixed
-                        .filter(function (s) { return s.value; })
-                        .map(function (s) {
-                            var parts = (s.value || "").split('!');
-                            return parseInt(parts[2] || 0);
-                        })
-                    );
-                    this.iSecuenciaCounter = maxSecuencia;
-                }
+                // Resincronizar contador global único
+                var aSlotsConValorR = aAllSlots.filter(function (s) { return s.value && s.value.trim() !== ""; });
+                this.iSecuenciaCounter = aSlotsConValorR.length === 0 ? 0
+                    : Math.max.apply(null, aSlotsConValorR.map(function (s) {
+                        return parseInt((s.value || "").split('!')[2] || 0, 10);
+                    }));
 
-                return { slots: aSlotsFixed, customValues: aCustomValues };
+                return {
+                    slots: (sGrupo === "ALM") ? oRouted.slotsAlm : oRouted.slotsSol,
+                    slotsSol: oRouted.slotsSol,
+                    slotsAlm: oRouted.slotsAlm,
+                    allSlots: aAllSlots,
+                    customValues: aCustomValues,
+                    iQtySol: iQtySol,
+                    iQtyAlm: iQtyAlm
+                };
             }.bind(this));
         },
         /**
-         * Asigna el barcode escaneado (desde input superior) al primer slot vacío.
-         * FLUJO: _refreshSlotsFromBackend() → validar duplicados → asignar slot vacío → merge → POST
-         * @param {string} sCantidadLote - Cantidad del lote formateada (ej: "150.00")
+         * Resuelve el grupo (SOL/ALM) al que pertenece un material escaneado
+         * comparándolo con los materiales del modelo orderSummary.
+         * @param {string} sMaterialEscaneado - material extraído del barcode (ya en mayúsculas)
+         * @returns {"SOL"|"ALM"|null} null si el material no pertenece a ningún grupo
          */
-        _ejecutarUpdate: function (sCantidadLote) {
+        _resolverGrupo: function (sMaterialEscaneado) {
+            var oOrderSummaryModel = this.getView().getModel("orderSummary");
+            if (!oOrderSummaryModel) { return null; }
+            var sMat1 = (oOrderSummaryModel.getProperty("/material") || "").toUpperCase();
+            var sMat2 = (oOrderSummaryModel.getProperty("/material2") || "").toUpperCase();
+            var sMat = sMaterialEscaneado.toUpperCase();
+            // /material = comp1 = Alambre → tabla ALM (ALOM)
+            // /material2 = comp2 = Solera  → tabla SOL (SSLO)
+            if (sMat1 && sMat === sMat1) { return "ALM"; }
+            if (sMat2 && sMat === sMat2) { return "SOL"; }
+            return null;
+        },
+
+        /**
+         * Asigna el barcode escaneado (desde input superior) al primer slot vacío del grupo correcto.
+         * FLUJO: resolver grupo por material → _refreshSlotsFromBackend(grupo) → validar duplicados
+         *        → asignar slot vacío → merge → POST
+         * @param {string} sCantidadLote - Cantidad del lote formateada (ej: "150.00")
+         * @param {string} sUomLote - Unidad de medida del lote formateada (ej: "KG")
+         */
+        _ejecutarUpdate: function (sCantidadLote, sUomLote) {
             const oView = this.getView();
             const oInput = oView.byId("scanInput");
             const sBarcode = oInput.getValue().trim();
             const oPODParams = this.Commons.getPODParams(this.getOwnerComponent());
             const oBundle = oView.getModel("i18n").getResourceBundle();
 
+            // Extraer material del barcode para resolver grupo
+            const sNormalizado = sBarcode.toUpperCase();
+            const partsEscaneado = sNormalizado.split('!');
+            const materialLoteEscaneado = partsEscaneado.slice(0, 2).join('!');
+            const sMaterialEscaneado = partsEscaneado[0] || "";
+
+            // Enrutamiento automático: determinar a qué tabla pertenece el material
+            const sGrupo = this._resolverGrupo(sMaterialEscaneado);
+            if (!sGrupo) {
+                sap.m.MessageToast.show(oBundle.getText("materialNoCorresponde", [sMaterialEscaneado]));
+                oInput.setValue(""); oInput.focus();
+                return;
+            }
+
+            const sTableId = sGrupo === "ALM" ? "idSlotTableAlm" : "idSlotTableSol";
+            const sQtyAttr = sGrupo === "ALM" ? "SLOTQTY_ALM" : "SLOTQTY_SOL";
+            const sQtyInpId = sGrupo === "ALM" ? "slotQty_alm" : "slotQty_sol";
+
             // Refrescar desde backend antes de operar para evitar datos stale
-            this._refreshSlotsFromBackend().then(function (oRefresh) {
+            this._refreshSlotsFromBackend(sGrupo).then(function (oRefresh) {
                 if (!oRefresh) {
                     sap.m.MessageToast.show(oBundle.getText("errorRefrescarSlots"));
-                    oInput.setValue("");
-                    oInput.focus();
+                    oInput.setValue(""); oInput.focus();
                     return;
                 }
 
-                const oTable = oView.byId("idSlotTable");
-                const oModel = oTable.getModel();
-                const aItems = oModel.getProperty("/ITEMS") || [];
+                // Usar el pool global de slots para todas las operaciones (ambas tablas)
+                const aAllSlots = oRefresh.allSlots;
 
-                // Extraer material!lote del barcode escaneado (ignorar secuencia si existe)
-                const sNormalizado = sBarcode.toUpperCase();
-                const partsEscaneado = sNormalizado.split('!');
-                const materialLoteEscaneado = partsEscaneado.slice(0, 2).join('!');
-
-                // Buscar si ya existe un item con el mismo material!lote (datos frescos)
-                const oExiste = aItems.find(function (Item) {
+                // Buscar duplicado material!lote en TODOS los slots (ambas tablas)
+                const oExiste = aAllSlots.find(function (Item) {
                     const valorItem = (Item.value || "").toString().trim().toUpperCase();
-                    if (!valorItem) return false;
-                    const partsItem = valorItem.split('!');
-                    const materialLoteItem = partsItem.slice(0, 2).join('!');
-                    return materialLoteItem === materialLoteEscaneado;
+                    if (!valorItem) { return false; }
+                    return valorItem.split('!').slice(0, 2).join('!') === materialLoteEscaneado;
                 });
 
                 if (oExiste) {
                     sap.m.MessageToast.show(oBundle.getText("barcodeExists", [sBarcode, oExiste.attribute]));
-                    oInput.setValue("");
-                    oInput.focus();
+                    oInput.setValue(""); oInput.focus();
                     return;
                 }
 
-                // Buscar el primer slot vacío (datos frescos)
-                const oEmptySlot = aItems.find(function (item) { return !item.value || item.value === ""; });
-
-                if (oEmptySlot) {
-                    this.iSecuenciaCounter++;
-                    oEmptySlot.value = sBarcode + "!" + this.iSecuenciaCounter;
-                    oEmptySlot.loteQty = sCantidadLote || "";
-                    oModel.refresh(true);
-                    this._updateOrderSummaryScannedQty(aItems);
-                } else {
+                // Primer slot vacío en el pool global
+                const oEmptySlot = aAllSlots.find(function (item) { return !item.value || item.value === ""; });
+                if (!oEmptySlot) {
                     sap.m.MessageToast.show(oBundle.getText("sinLotes"));
-                    oInput.setValue("");
-                    oInput.focus();
+                    oInput.setValue(""); oInput.focus();
                     return;
                 }
 
-                oInput.setValue("");
-                oInput.focus();
+                // Incrementar contador global compartido
+                this.iSecuenciaCounter++;
+                oEmptySlot.value = sBarcode + "!" + this.iSecuenciaCounter;
+                oEmptySlot.loteQty = sCantidadLote || "";
+                oEmptySlot.loteUom = sUomLote || "";
+
+                // Re-rutear y actualizar AMBAS tablas
+                const oRoutedUpd = this._routeSlotsToTables(aAllSlots, oRefresh.iQtySol, oRefresh.iQtyAlm);
+                const oTableSolUpd = oView.byId("idSlotTableSol");
+                const oTableAlmUpd = oView.byId("idSlotTableAlm");
+                if (oTableSolUpd) { oTableSolUpd.setModel(new sap.ui.model.json.JSONModel({ ITEMS: oRoutedUpd.slotsSol })); }
+                if (oTableAlmUpd) { oTableAlmUpd.setModel(new sap.ui.model.json.JSONModel({ ITEMS: oRoutedUpd.slotsAlm })); }
+
+                this._updateOrderSummaryScannedQty(oRoutedUpd.slotsSol, oRoutedUpd.slotsAlm);
+
+                oInput.setValue(""); oInput.focus();
 
                 const slotTipo = oView.byId("slotType") ? oView.byId("slotType").getValue() : "";
-                const slotQty = oView.byId("slotQty") ? oView.byId("slotQty").getValue() : "";
+                const slotQtySol = oView.byId("slotQty_sol") ? oView.byId("slotQty_sol").getValue() : "";
+                const slotQtyAlm = oView.byId("slotQty_alm") ? oView.byId("slotQty_alm").getValue() : "";
 
-                // Construir editados sobre datos frescos
                 const aEdited = [
                     { attribute: "SLOTTIPO", value: slotTipo },
-                    { attribute: "SLOTQTY", value: slotQty },
-                    ...aItems.map(function (slot) { return { attribute: slot.attribute, value: slot.value }; })
+                    { attribute: "SLOTQTY_SOL", value: slotQtySol },
+                    { attribute: "SLOTQTY_ALM", value: slotQtyAlm },
+                    ...aAllSlots.map(function (slot) { return { attribute: slot.attribute, value: slot.value }; })
                 ];
 
-                // Merge con customValues frescos (ya obtenidos en el refresh, sin doble consulta)
                 const aOriginal = oRefresh.customValues;
                 const editedMap = {};
                 aEdited.forEach(function (item) { editedMap[item.attribute] = item.value; });
@@ -708,20 +812,18 @@ sap.ui.define([
                         value: editedMap.hasOwnProperty(item.attribute) ? editedMap[item.attribute] : item.value
                     };
                 });
-
                 for (var key in editedMap) {
                     if (!aCustomValuesFinal.find(function (i) { return i.attribute === key; })) {
                         aCustomValuesFinal.push({ attribute: key, value: editedMap[key] });
                     }
                 }
 
-                const sMaterialLote = materialLoteEscaneado || "";
                 const oSapApi = this.getPublicApiRestDataSourceUri();
                 this.setCustomValuesPp({
                     inCustomValues: aCustomValuesFinal,
                     inPlant: oPODParams.PLANT_ID,
                     inWorkCenter: oPODParams.WORK_CENTER,
-                    inMaterialLote: sMaterialLote
+                    inMaterialLote: materialLoteEscaneado
                 }, oSapApi).then(function () {
                     sap.m.MessageToast.show(oBundle.getText("slotActualizado"));
                 }).catch(function () {
@@ -747,7 +849,15 @@ sap.ui.define([
             sap.m.MessageToast.show(oBundle.getText("scanFailed", [oEvent]), { duration: 1000 });
         },
         onScanLiveupdate: function (oEvent) {
-            // User can implement the validation about inputting value
+            // Auto-submit al escanear con pistola física (USB/Bluetooth).
+            // La pistola envía todos los caracteres en <150ms; si no llegan
+            // más caracteres en 500ms se asume que el código está completo.
+            clearTimeout(this._oScanDebounceTimer);
+            var sValue = oEvent.getParameter("value") || "";
+            if (!sValue) { return; }
+            this._oScanDebounceTimer = setTimeout(function () {
+                this.onBarcodeSubmit();
+            }.bind(this), 400);
         },
         /**
          * Elimina un lote de la tabla y recorre los posteriores hacia arriba.
@@ -758,13 +868,24 @@ sap.ui.define([
          */
         onDeleteSlot: function (oEvent) {
             const oView = this.getView();
-            const oTable = this.byId("idSlotTable");
-            const oModel = oTable.getModel();
+            // Resolver la tabla desde el botón pulsado (no asumir cuál está activa)
+            const oButton = oEvent.getSource();
+            const oItem = oButton.getParent();
+            // El padre del ColumnListItem es el Table
+            const oTable = oItem.getParent();
+            const oModel = oTable ? oTable.getModel() : null;
             const oPODParams = this.Commons.getPODParams(this.getOwnerComponent());
             var oBundle = this.getView().getModel("i18n").getResourceBundle();
 
+            if (!oModel) { return; }
+
+            // Resolver grupo desde el ID de la tabla
+            const sTableId = oTable.getId ? oTable.getId() : "";
+            const sGrupo = sTableId.indexOf("Alm") !== -1 ? "ALM" : "SOL";
+            const sQtyAttr = sGrupo === "ALM" ? "SLOTQTY_ALM" : "SLOTQTY_SOL";
+            const sQtyInpId = sGrupo === "ALM" ? "slotQty_alm" : "slotQty_sol";
+
             // Capturar el valor del slot a eliminar ANTES del refresh (la ref DOM puede cambiar)
-            const oItem = oEvent.getSource().getParent();
             const iCurrentIndex = oTable.indexOfItem(oItem);
             if (iCurrentIndex === -1) {
                 return;
@@ -776,60 +897,69 @@ sap.ui.define([
             }
 
             // Refrescar desde backend antes de operar para evitar datos stale
-            this._refreshSlotsFromBackend().then(function (oRefresh) {
+            this._refreshSlotsFromBackend(sGrupo).then(function (oRefresh) {
                 if (!oRefresh) {
                     sap.m.MessageToast.show(oBundle.getText("errorRefrescarSlots"));
                     return;
                 }
 
-                const oFreshModel = oTable.getModel();
-                var aSlots = oFreshModel.getProperty("/ITEMS") || [];
+                // Usar el pool global para operar en AMBAS tablas simultáneamente
+                var aAllSlotsD = oRefresh.allSlots;
 
-                // Buscar el slot con el valor a eliminar en datos frescos
-                const iIndex = aSlots.findIndex(function (s) {
+                // Buscar el slot con el valor a eliminar en el pool global
+                const iIndex = aAllSlotsD.findIndex(function (s) {
                     return (s.value || "").trim() === sValueToDelete;
                 });
 
                 if (iIndex === -1) {
-                    // Ya fue eliminado externamente
                     sap.m.MessageToast.show(oBundle.getText("loteYaEliminado"));
                     return;
                 }
 
-                // Eliminar y recorrer hacia arriba
-                for (var i = iIndex; i < aSlots.length - 1; i++) {
-                    aSlots[i].value = aSlots[i + 1].value;
-                    aSlots[i].loteQty = aSlots[i + 1].loteQty;
+                // Recorrer hacia arriba globalmente (ambas tablas como una sola lista)
+                for (var i = iIndex; i < aAllSlotsD.length - 1; i++) {
+                    aAllSlotsD[i].value   = aAllSlotsD[i + 1].value;
+                    aAllSlotsD[i].loteQty = aAllSlotsD[i + 1].loteQty;
+                    aAllSlotsD[i].loteUom = aAllSlotsD[i + 1].loteUom;
                 }
-                aSlots[aSlots.length - 1].value = "";
-                aSlots[aSlots.length - 1].loteQty = "";
+                aAllSlotsD[aAllSlotsD.length - 1].value   = "";
+                aAllSlotsD[aAllSlotsD.length - 1].loteQty = "";
+                aAllSlotsD[aAllSlotsD.length - 1].loteUom = "";
 
-                // Renumerar secuencia
+                // Renumerar secuencia globalmente
                 var iNuevaSecuencia = 0;
-                aSlots.forEach(function (slot) {
+                aAllSlotsD.forEach(function (slot) {
                     var sValorActual = ((slot && slot.value) || "").toString().trim();
-                    if (!sValorActual) return;
+                    if (!sValorActual) { return; }
                     var aPartes = sValorActual.split('!');
                     if (aPartes.length >= 2) {
                         iNuevaSecuencia++;
                         slot.value = aPartes.slice(0, 2).join('!') + "!" + iNuevaSecuencia;
                     }
                 });
+                // Actualizar contador global único
                 this.iSecuenciaCounter = iNuevaSecuencia;
 
-                oFreshModel.setProperty("/ITEMS", aSlots);
-                oFreshModel.refresh(true);
-                this._updateOrderSummaryScannedQty(aSlots);
+                // Re-rutear y actualizar AMBAS tablas
+                const oRoutedDel = this._routeSlotsToTables(aAllSlotsD, oRefresh.iQtySol, oRefresh.iQtyAlm);
+                const oTableSolD = oView.byId("idSlotTableSol");
+                const oTableAlmD = oView.byId("idSlotTableAlm");
+                if (oTableSolD) { oTableSolD.setModel(new sap.ui.model.json.JSONModel({ ITEMS: oRoutedDel.slotsSol })); }
+                if (oTableAlmD) { oTableAlmD.setModel(new sap.ui.model.json.JSONModel({ ITEMS: oRoutedDel.slotsAlm })); }
+
+                this._updateOrderSummaryScannedQty(oRoutedDel.slotsSol, oRoutedDel.slotsAlm);
 
                 sap.m.MessageToast.show(oBundle.getText("loteEliminado"));
 
                 var slotTipo = oView.byId("slotType") ? oView.byId("slotType").getValue() : "";
-                var slotQty = oView.byId("slotQty") ? oView.byId("slotQty").getValue() : "";
+                var slotQtySolD = oView.byId("slotQty_sol") ? oView.byId("slotQty_sol").getValue() : "";
+                var slotQtyAlmD = oView.byId("slotQty_alm") ? oView.byId("slotQty_alm").getValue() : "";
 
                 var aEdited = [
                     { attribute: "SLOTTIPO", value: slotTipo },
-                    { attribute: "SLOTQTY", value: slotQty }
-                ].concat(aSlots.map(function (slot) { return { attribute: slot.attribute, value: slot.value }; }));
+                    { attribute: "SLOTQTY_SOL", value: slotQtySolD },
+                    { attribute: "SLOTQTY_ALM", value: slotQtyAlmD }
+                ].concat(aAllSlotsD.map(function (slot) { return { attribute: slot.attribute, value: slot.value }; }));
 
                 // Merge con customValues frescos (ya obtenidos en el refresh)
                 var aOriginal = oRefresh.customValues;
@@ -888,17 +1018,25 @@ sap.ui.define([
             const sMaterial = parts[0].trim();
             const sLote = parts[1].trim();
 
-            // Capturar atributo del slot antes de validación (la referencia DOM puede cambiar tras refresh)
-            const oButton = oEvent.getSource();
-            const oSlotItem = oButton.getParent();
-            const oTable = this.byId("idSlotTable");
-            const iSlotIndex = oTable.indexOfItem(oSlotItem);
-            const oSlotModel = oTable.getModel();
+            // Capturar tabla y atributo desde el botón pulsado (no depender del toggle)
+            const oScanButton = oEvent.getSource();
+            const oSlotItem = oScanButton.getParent();
+            const oTableScan = oSlotItem.getParent();  // El Table que contiene el item
+            const iSlotIndex = oTableScan.indexOfItem(oSlotItem);
+            const oSlotModel = oTableScan.getModel();
             const aCurrentSlots = (oSlotModel && oSlotModel.getProperty("/ITEMS")) || [];
-            const sSlotAttribute = (iSlotIndex >= 0 && aCurrentSlots[iSlotIndex]) ? aCurrentSlots[iSlotIndex].attribute : null;
+            const sSlotAttribute = (iSlotIndex >= 0 && aCurrentSlots[iSlotIndex])
+                ? aCurrentSlots[iSlotIndex].attribute : null;
+
+            // Resolver grupo desde el ID de la tabla
+            const sTableScanId = oTableScan.getId ? oTableScan.getId() : "";
+            const sGrupoScan = sTableScanId.indexOf("Alm") !== -1 ? "ALM" : "SOL";
 
             // Guarda contexto para actualizar la fila cuando ambas validaciones pasen
-            this._slotContext = { oEvent: oEvent, sBarcode: sBarcode, loteExtraido: sLote, slotAttribute: sSlotAttribute };
+            this._slotContext = {
+                sBarcode: sBarcode, loteExtraido: sLote,
+                slotAttribute: sSlotAttribute, sGrupo: sGrupoScan
+            };
 
             // Reutiliza la validación combinada
             this._validarMaterialYLote(sLote, sMaterial);
@@ -910,32 +1048,38 @@ sap.ui.define([
          *        → asignar valor+secuencia → merge con customValues frescos → POST
          * @param {string} sCantidadLote - Cantidad del lote formateada (ej: "150.00")
          */
-        _procesarSlotValidado: function (sCantidadLote) {
+        _procesarSlotValidado: function (sCantidadLote, sUomLote) {
             if (!this._slotContext) {
                 const oBundle = this.getView().getModel("i18n").getResourceBundle();
                 console.error(oBundle.getText("noContextoSlot"));
                 return;
             }
 
-            const { sBarcode, slotAttribute } = this._slotContext;
+            const { sBarcode, slotAttribute, sGrupo } = this._slotContext;
             const oBundle = this.getView().getModel("i18n").getResourceBundle();
             const oPODParams = this.Commons.getPODParams(this.getOwnerComponent());
 
+            const sTableId = sGrupo === "ALM" ? "idSlotTableAlm" : "idSlotTableSol";
+            const sQtyAttr = sGrupo === "ALM" ? "SLOTQTY_ALM" : "SLOTQTY_SOL";
+            const sQtyInpId = sGrupo === "ALM" ? "slotQty_alm" : "slotQty_sol";
+
             // Refrescar desde backend antes de operar para evitar datos stale
-            this._refreshSlotsFromBackend().then(function (oRefresh) {
+            this._refreshSlotsFromBackend(sGrupo).then(function (oRefresh) {
                 if (!oRefresh) {
                     sap.m.MessageToast.show(oBundle.getText("errorRefrescarSlots"));
                     this._slotContext = null;
                     return;
                 }
 
-                const oTable = this.byId("idSlotTable");
+                const oTable = this.byId(sTableId);
                 const oModel = oTable.getModel();
-                const aSlots = oModel.getProperty("/ITEMS") || [];
 
-                // Encontrar el slot destino por atributo (no por referencia DOM que puede ser stale)
-                const iIndex = aSlots.findIndex(function (s) { return s.attribute === slotAttribute; });
-                if (iIndex === -1 || !aSlots[iIndex]) {
+                // Usar el pool global para operar en ambas tablas
+                const aAllSlotsProc = oRefresh.allSlots;
+
+                // Encontrar el slot destino por atributo en el pool global
+                const iIndex = aAllSlotsProc.findIndex(function (s) { return s.attribute === slotAttribute; });
+                if (iIndex === -1 || !aAllSlotsProc[iIndex]) {
                     sap.m.MessageToast.show(oBundle.getText("errorRefrescarSlots"));
                     this._slotContext = null;
                     return;
@@ -945,8 +1089,8 @@ sap.ui.define([
                 const partsEscaneado = sNormalizado.split('!');
                 const materialLoteEscaneado = partsEscaneado.slice(0, 2).join('!');
 
-                // Buscar duplicados en datos frescos
-                const sExiste = aSlots.find(function (slot, idx) {
+                // Buscar duplicados en TODOS los slots (ambas tablas)
+                const sExiste = aAllSlotsProc.find(function (slot, idx) {
                     if (idx === iIndex) return false;
                     const valorSlot = (slot.value || "").toString().trim().toUpperCase();
                     if (!valorSlot) return false;
@@ -962,7 +1106,7 @@ sap.ui.define([
                 }
 
                 // Si el valor ya es el mismo en esa fila, no actualizar
-                const valorActual = (aSlots[iIndex].value || "").toString().trim().toUpperCase();
+                const valorActual = (aAllSlotsProc[iIndex].value || "").toString().trim().toUpperCase();
                 if (valorActual) {
                     const partsActual = valorActual.split('!');
                     const materialLoteActual = partsActual.slice(0, 2).join('!');
@@ -973,28 +1117,31 @@ sap.ui.define([
                     }
                 }
 
-                const iSlotsConValor = aSlots.filter(function (slot) {
-                    return slot.value && slot.value.trim() !== "";
-                }).length;
-                if (iSlotsConValor === 0) {
-                    this.iSecuenciaCounter = 0;
-                }
-
+                // Incrementar contador global compartido
                 this.iSecuenciaCounter++;
-                aSlots[iIndex].value = sBarcode + "!" + this.iSecuenciaCounter;
-                aSlots[iIndex].loteQty = sCantidadLote || "";
-                oModel.setProperty("/ITEMS", aSlots);
-                oModel.refresh(true);
-                this._updateOrderSummaryScannedQty(aSlots);
+                aAllSlotsProc[iIndex].value   = sBarcode + "!" + this.iSecuenciaCounter;
+                aAllSlotsProc[iIndex].loteQty = sCantidadLote || "";
+                aAllSlotsProc[iIndex].loteUom = sUomLote || "";
 
+                // Re-rutear y actualizar AMBAS tablas
                 const oView = this.getView();
+                const oRoutedProc = this._routeSlotsToTables(aAllSlotsProc, oRefresh.iQtySol, oRefresh.iQtyAlm);
+                const oTableSolProc = oView.byId("idSlotTableSol");
+                const oTableAlmProc = oView.byId("idSlotTableAlm");
+                if (oTableSolProc) { oTableSolProc.setModel(new sap.ui.model.json.JSONModel({ ITEMS: oRoutedProc.slotsSol })); }
+                if (oTableAlmProc) { oTableAlmProc.setModel(new sap.ui.model.json.JSONModel({ ITEMS: oRoutedProc.slotsAlm })); }
+
+                this._updateOrderSummaryScannedQty(oRoutedProc.slotsSol, oRoutedProc.slotsAlm);
+
                 const slotTipo = oView.byId("slotType") ? oView.byId("slotType").getValue() : "";
-                const slotQty = oView.byId("slotQty") ? oView.byId("slotQty").getValue() : "";
+                const slotQtySolProc = oView.byId("slotQty_sol") ? oView.byId("slotQty_sol").getValue() : "";
+                const slotQtyAlmProc = oView.byId("slotQty_alm") ? oView.byId("slotQty_alm").getValue() : "";
 
                 const aEdited = [
                     { attribute: "SLOTTIPO", value: slotTipo },
-                    { attribute: "SLOTQTY", value: slotQty },
-                    ...aSlots.map(function (slot) { return { attribute: slot.attribute, value: slot.value }; })
+                    { attribute: "SLOTQTY_SOL", value: slotQtySolProc },
+                    { attribute: "SLOTQTY_ALM", value: slotQtyAlmProc },
+                    ...aAllSlotsProc.map(function (slot) { return { attribute: slot.attribute, value: slot.value }; })
                 ];
 
                 // Merge con customValues frescos (ya obtenidos en el refresh)
@@ -1105,7 +1252,7 @@ sap.ui.define([
                         return oComp && oComp.componentType === "NORMAL";
                     });
 
-                    if (!oNormalComponent) {
+                    if (oNormalComponent.length === 0) {
                         console.warn("[OrderSummary] No se encontró componente NORMAL en BOMS", oBomData);
                         return;
                     }
@@ -1146,7 +1293,12 @@ sap.ui.define([
                                 oOrderSummaryModel.setProperty("/descripcion2", (oHeader2 && oHeader2.description) || "");
                             }
 
-                            this._updateOrderSummaryScannedQty();
+                            this._updateOrderSummaryScannedQty(
+                                (this.byId("idSlotTableSol") && this.byId("idSlotTableSol").getModel())
+                                    ? this.byId("idSlotTableSol").getModel().getProperty("/ITEMS") : [],
+                                (this.byId("idSlotTableAlm") && this.byId("idSlotTableAlm").getModel())
+                                    ? this.byId("idSlotTableAlm").getModel().getProperty("/ITEMS") : []
+                            );
 
                         }.bind(this))
                         .catch(function (error) {
@@ -1161,63 +1313,89 @@ sap.ui.define([
                 }.bind(this));
         },
 
-        _updateOrderSummaryScannedQty: function (aItems) {
+        /**
+         * Recalcula cantidadEscaneada y cantidadEscaneada2 en el modelo orderSummary
+         * sumando los loteQty de las dos tablas independientes.
+         * @param {Array} aItemsSol - Items de la tabla Solera (idSlotTableSol)
+         * @param {Array} aItemsAlm - Items de la tabla Alambre (idSlotTableAlm)
+         */
+        _updateOrderSummaryScannedQty: function (aItemsSol, aItemsAlm) {
             const oOrderSummaryModel = this.getView().getModel("orderSummary");
-            if (!oOrderSummaryModel) {
-                return;
-            }
+            if (!oOrderSummaryModel) { return; }
 
-            let aSourceItems = aItems;
-            if (!Array.isArray(aSourceItems)) {
-                const oTable = this.byId("idSlotTable");
-                const oTableModel = oTable && oTable.getModel();
-                aSourceItems = (oTableModel && oTableModel.getProperty("/ITEMS")) || [];
-            }
+            const fnSumQty = function (aItems) {
+                const arr = Array.isArray(aItems) ? aItems : [];
+                return arr.reduce(function (nTotal, oItem) {
+                    const nQty = parseFloat(oItem && oItem.loteQty);
+                    return nTotal + (isNaN(nQty) ? 0 : nQty);
+                }, 0);
+            };
 
-            const nScannedQty = aSourceItems.reduce(function (nTotal, oItem) {
-                const nQty = parseFloat(oItem && oItem.loteQty);
-                return nTotal + (isNaN(nQty) ? 0 : nQty);
-            }, 0);
-
-            oOrderSummaryModel.setProperty("/cantidadEscaneada", Number(nScannedQty.toFixed(2)));
+            // /cantidadEscaneada  → fila Alambre → idSlotTableAlm (aItemsAlm)
+            // /cantidadEscaneada2 → fila Solera  → idSlotTableSol (aItemsSol)
+            oOrderSummaryModel.setProperty("/cantidadEscaneada",  Number(fnSumQty(aItemsAlm).toFixed(2)));
+            oOrderSummaryModel.setProperty("/cantidadEscaneada2", Number(fnSumQty(aItemsSol).toFixed(2)));
         },
+        /**
+         * Abre el diálogo de lista de lotes.
+         * Detecta automáticamente el grupo (SOL/ALM) desde la tabla cuyo toolbar
+         * contiene el botón pulsado: botón → Toolbar → Table → leer ID.
+         * Según el grupo usa el material y el fragment correcto.
+         */
         onPressOpenFragmentList: function (oEvent) {
             var oView = this.getView();
-            var oThis = this;
             var oSource = oEvent.getSource();
             var oPODParams = this.Commons.getPODParams(this.getOwnerComponent());
+            var oBundle = oView.getModel("i18n").getResourceBundle();
             var oOrderSummaryModel = oView.getModel("orderSummary");
-            var sMaterial = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material") : "";
-            var nCantidadRequerida = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/cantidadNecesaria") : 0;
+
+            // Leer el grupo directamente desde el customData del botón ("SOL" o "ALM")
+            var sGrupo = oSource.data("grupo") || "ALM";
+
+            var sMaterial, nCantidadRequerida, sFragId, sDialogId;
+            if (sGrupo === "ALM") {
+                // Alambre → usa /material (comp1) → dialog Alm
+                sMaterial          = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material")         : "";
+                nCantidadRequerida = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/cantidadNecesaria") : 0;
+                sFragId   = oView.getId() + "--Alm";
+                sDialogId = "Alm--batchListDialog";
+            } else {
+                // Solera → usa /material2 (comp2) → dialog Sol
+                sMaterial          = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material2")          : "";
+                nCantidadRequerida = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/cantidadNecesaria2") : 0;
+                sFragId   = oView.getId();
+                sDialogId = "batchListDialog";
+            }
 
             if (!sMaterial) {
-                var oBundle = oView.getModel("i18n").getResourceBundle();
                 sap.m.MessageToast.show(oBundle.getText("errorObtenerHeaderMaterial", [""]));
                 return;
             }
 
-            if (!this.byId("batchListDialog")) {
+            var oThis = this;
+            if (!this.byId(sDialogId)) {
                 Fragment.load({
-                    id: oView.getId(),
-                    name: "serviacero.custom.plugins.zpluginPutBatchWCNB.zpluginPutBatchWCNB.fragment.batchList",
+                    id: sFragId,
+                    name: "serviacero.custom.plugins.zpluginPutBatchWCEF01.zpluginPutBatchWCEF01.fragment.batchList",
                     controller: this
                 }).then(function (oPopover) {
                     oView.addDependent(oPopover);
                     oPopover.openBy(oSource);
-                    oThis.enlistarInventario(oPODParams.PLANT_ID, oPODParams.ORDER_ID, sMaterial, nCantidadRequerida);
+                    oThis.enlistarInventario(oPODParams.PLANT_ID, oPODParams.ORDER_ID, sMaterial, nCantidadRequerida, sDialogId);
                 });
             } else {
-                this.byId("batchListDialog").openBy(oSource);
-                this.enlistarInventario(oPODParams.PLANT_ID, oPODParams.ORDER_ID, sMaterial, nCantidadRequerida);
+                this.byId(sDialogId).openBy(oSource);
+                this.enlistarInventario(oPODParams.PLANT_ID, oPODParams.ORDER_ID, sMaterial, nCantidadRequerida, sDialogId);
             }
         },
 
         // Consulta lotes disponibles para el material de la orden vía PP getLotesMaterialStock
-        enlistarInventario: function (sPlant, sOrden, sMaterial, nCantidadRequerida) {
+        // sDialogId: ID del byId del popover a poblar ("batchListDialog" o "Alm--batchListDialog")
+        enlistarInventario: function (sPlant, sOrden, sMaterial, nCantidadRequerida, sDialogId) {
             var oView = this.getView();
             var oSapApi = this.getPublicApiRestDataSourceUri();
             var oBundle = oView.getModel("i18n").getResourceBundle();
-            var oDialog = this.byId("batchListDialog");
+            var oDialog = this.byId(sDialogId || "batchListDialog");
 
             if (!oDialog) { return; }
 
