@@ -31,7 +31,9 @@ sap.ui.define([
 
         /**
          * Extrae la secuencia del valor completo (después del segundo !)
-         * @param {string} sValue - Valor en formato "material!lote!secuencia"
+         * Nuevo formato: material!lote!cantidad!secuencia → parts[3]
+         * Formato antiguo: material!lote!secuencia → parts[2]
+         * @param {string} sValue - Valor en formato "material!lote!secuencia" o "material!lote!cantidad!secuencia"
          * @returns {string} - Solo la secuencia
          */
         getSecuencia: function (sValue) {
@@ -39,7 +41,7 @@ sap.ui.define([
                 return "";
             }
             const aParts = sValue.split('!');
-            return aParts[2] || "";
+            return aParts.length >= 4 ? (aParts[3] || "") : (aParts[2] || "");
         }
     };
 });

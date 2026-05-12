@@ -18,22 +18,20 @@
         class="sapUiNoContentPadding">
 
         <!-- ═══ BARCODE INPUT ═══ -->
-        <HBox width="80%" class="sapUiSmallMarginBottom">
+        <HBox width="80%" class="sapUiSmallMarginBottom" alignItems="Center">
             <MessageStrip text="{i18n>scannerReady}" type="Information" showIcon="true"
                 customIcon="sap-icon://bar-code"
                 class="sapUiSmallMarginTop sapUiSmallMarginBeginEnd sapUiSmallMarginBottom" />
-        </HBox>
-        <HBox width="80%" class="sapUiSmallMarginBottom sapUiSmallMarginBeginEnd" alignItems="Center">
             <Label text="{i18n>Barcode}" class="sapUiSmallMarginEnd"/>
             <Input id="scanInput" submit=".onBarcodeSubmit" liveChange=".onScanLiveupdate"
                 class="sapUiSmallMarginEnd sapUiSmallMarginBeginEnd" width="300px"/>
-            <ndc:BarcodeScannerButton
+            <!-- <ndc:BarcodeScannerButton
                 id="sampleBarcodeScannerButton"
                 scanSuccess="onScanSuccess"
                 scanFail="onScanError"
                 inputLiveUpdate="onScanLiveupdate"
                 dialogTitle="{i18n>BarcodeScanner}"
-                class="sapUiMediumMarginBegin sapUiSmallMarginEnd"/>
+                class="sapUiMediumMarginBegin sapUiSmallMarginEnd"/> -->
         </HBox>
 
         <!-- ═══ RESUMEN DE ORDEN ═══ -->
@@ -43,7 +41,7 @@
 
         <!-- Cabeceras de columnas del resumen -->
         <HBox width="97%" class="sapUiSmallMarginBeginEnd sapUiTinyMarginBottom" alignItems="Center">
-            <VBox width="70px"/>
+            <VBox width="85px"/>
             <VBox width="18%" class="sapUiSmallMarginEnd"><Label text="{i18n>materialCode}"/></VBox>
             <VBox width="30%" class="sapUiSmallMarginEnd"><Label text="{i18n>descripcionMaterial}"/></VBox>
             <VBox width="12%" class="sapUiSmallMarginEnd"><Label text="{i18n>cantidadNecesaria}"/></VBox>
@@ -84,7 +82,7 @@
             </VBox>
         </HBox>
 
-        <!-- ═══ TOGGLE SOLERA / ALAMBRE ═══ -->
+        <!-- ═══ TOGGLE ALAMBRE / SOLERA ═══ -->
         <HBox width="97%" class="sapUiSmallMarginBeginEnd sapUiSmallMarginTop" alignItems="Center" justifyContent="Center">
             <SegmentedButton id="tableToggle" selectedKey="ALM" selectionChange=".onToggleTable">
                 <items>
@@ -126,6 +124,9 @@
                     <Column width="30%" hAlign="Left" vAlign="Middle" visible="false">
                         <Text text="{i18n>Slot}" visible="false"/>
                     </Column>
+                    <Column width="8%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>secuenciaCode}"/>
+                    </Column>
                     <Column width="30%" hAlign="Left" vAlign="Middle">
                         <Text text="{i18n>materialCode}"/>
                     </Column>
@@ -135,10 +136,10 @@
                     <Column width="15%" hAlign="Left" vAlign="Middle">
                         <Text text="{i18n>loteQty}"/>
                     </Column>
-                    <Column width="15%" hAlign="Left" vAlign="Middle">
-                        <Text text="{i18n>secuenciaCode}"/>
+                    <Column width="10%" hAlign="Center" vAlign="Middle">
+                        <Text text="{i18n>modificarcantidad}" />
                     </Column>
-                    <Column width="60%" hAlign="Left" vAlign="Middle">
+                    <Column width="60%" hAlign="Left" vAlign="Middle" visible="false">
                         <Text text="{i18n>Value}" visible="false"/>
                     </Column>
                     <Column width="10%" hAlign="Center" vAlign="Middle">
@@ -152,16 +153,13 @@
                     <ColumnListItem vAlign="Middle">
                         <cells>
                             <Text text="{attribute}"/>
+                            <Text text="{path: 'value', formatter: '.formatter.getSecuencia'}" enabled="false"/>
                             <Input value="{path: 'value', formatter: '.formatter.getMaterial'}" enabled="false"/>
                             <Input value="{path: 'value', formatter: '.formatter.getLote'}" enabled="false"/>
-                            <!-- <Input value="{loteQty}" enabled="false"/> -->
                             <ObjectAttribute text="{loteQty} {loteUom}" />
-                            <Input value="{path: 'value', formatter: '.formatter.getSecuencia'}" enabled="false"/>
+                            <Input value="{cantidadAsignada}" placeholder="{loteQty}" enabled="true" type="Number" width="100px"/>
                             <Input value="{value}" enabled="false" visible="false"/>
-                            <ndc:BarcodeScannerButton
-                                scanSuccess=".onScanSlotSuccess"
-                                scanFail=".onScanError"
-                                dialogTitle="{i18n>BarcodeScanner}"/>
+                            <Button icon="sap-icon://add" press=".onAddQty" tooltip="{i18n>modificarcantidad}"/>
                             <Button icon="sap-icon://delete" press=".onDeleteSlot" type="Reject"/>
                         </cells>
                     </ColumnListItem>
@@ -196,6 +194,9 @@
                     <Column width="30%" hAlign="Left" vAlign="Middle" visible="false">
                         <Text text="{i18n>Slot}" visible="false"/>
                     </Column>
+                    <Column width="8%" hAlign="Left" vAlign="Middle">
+                        <Text text="{i18n>secuenciaCode}"/>
+                    </Column>
                     <Column width="30%" hAlign="Left" vAlign="Middle">
                         <Text text="{i18n>materialCode}"/>
                     </Column>
@@ -205,10 +206,10 @@
                     <Column width="15%" hAlign="Left" vAlign="Middle">
                         <Text text="{i18n>loteQty}"/>
                     </Column>
-                    <Column width="15%" hAlign="Left" vAlign="Middle">
-                        <Text text="{i18n>secuenciaCode}"/>
+                    <Column width="10%" hAlign="Center" vAlign="Middle">
+                        <Text text="{i18n>modificarcantidad}" />
                     </Column>
-                    <Column width="60%" hAlign="Left" vAlign="Middle">
+                    <Column width="60%" hAlign="Left" vAlign="Middle" visible="false">
                         <Text text="{i18n>Value}" visible="false"/>
                     </Column>
                     <Column width="10%" hAlign="Center" vAlign="Middle">
@@ -222,16 +223,13 @@
                     <ColumnListItem vAlign="Middle">
                         <cells>
                             <Text text="{attribute}"/>
+                            <Text text="{path: 'value', formatter: '.formatter.getSecuencia'}" />
                             <Input value="{path: 'value', formatter: '.formatter.getMaterial'}" enabled="false"/>
                             <Input value="{path: 'value', formatter: '.formatter.getLote'}" enabled="false"/>
-                            <!-- <Input value="{loteQty}" enabled="false"/> -->
                             <ObjectAttribute text="{loteQty} {loteUom}" />
-                            <Input value="{path: 'value', formatter: '.formatter.getSecuencia'}" enabled="false"/>
+                            <Input value="{cantidadAsignada}" placeholder="{loteQty}" enabled="true" type="Number" width="100px"/>
                             <Input value="{value}" enabled="false" visible="false"/>
-                            <ndc:BarcodeScannerButton
-                                scanSuccess=".onScanSlotSuccess"
-                                scanFail=".onScanError"
-                                dialogTitle="{i18n>BarcodeScanner}"/>
+                            <Button icon="sap-icon://add" press=".onAddQty" tooltip="{i18n>modificarcantidad}"/>
                             <Button icon="sap-icon://delete" press=".onDeleteSlot" type="Reject"/>
                         </cells>
                     </ColumnListItem>
