@@ -182,7 +182,7 @@ sap.ui.define([
          */
         _routeSlotsToTables: function (aAllSlots, iQtySol, iQtyAlm) {
             var oOrderSummaryModel = this.getView().getModel("orderSummary");
-            var sMatAlm = oOrderSummaryModel ? (oOrderSummaryModel.getProperty("/material")  || "").toUpperCase() : "";
+            var sMatAlm = oOrderSummaryModel ? (oOrderSummaryModel.getProperty("/material") || "").toUpperCase() : "";
             var sMatSol = oOrderSummaryModel ? (oOrderSummaryModel.getProperty("/material2") || "").toUpperCase() : "";
 
             var aFilledAlm = [], aFilledSol = [], aEmpty = [];
@@ -465,18 +465,9 @@ sap.ui.define([
             const bEsPuestoCritico = ["TA01", "TA02", "SL02"].includes(puesto);
 
             // Validación de estatus de operación (en tiempo real desde POD)
-            var oPodSelectionModel = this.getPodSelectionModel();
-            var sCurrentStatus = "";
-            if (oPodSelectionModel && oPodSelectionModel.selectedPhaseData) {
-                sCurrentStatus = oPodSelectionModel.selectedPhaseData.status || "";
-            }
-            // Fallback a gOperationPhase si no hay POD data
-            if (!sCurrentStatus && gOperationPhase) {
-                sCurrentStatus = gOperationPhase.status || "";
-            }
-
+            const sCurrentStatus = this._getCurrentOperationStatus();
             if (sCurrentStatus !== OPERATION_STATUS.ACTIVE) {
-                sap.m.MessageBox.error(oBundle.getText("verificarStatusOperacion"));
+                sap.m.MessageBox.error(oBundle.getText("verificarStatusOperacion"))
                 return;
             }
 
@@ -566,7 +557,7 @@ sap.ui.define([
 
                             if (bEsValido) {
                                 const sCantidadLote = this._formatLoteQty(oResponseData.outCantidadLote);
-                                const sUomLote =  oResponseData.outOUMLote;
+                                const sUomLote = oResponseData.outOUMLote;
                                 // Detectar de dónde vino el escaneo
                                 if (!this._slotContext) {
                                     // Viene del input superior → buscar slot vacío
@@ -929,11 +920,11 @@ sap.ui.define([
 
                 // Recorrer hacia arriba globalmente (ambas tablas como una sola lista)
                 for (var i = iIndex; i < aAllSlotsD.length - 1; i++) {
-                    aAllSlotsD[i].value   = aAllSlotsD[i + 1].value;
+                    aAllSlotsD[i].value = aAllSlotsD[i + 1].value;
                     aAllSlotsD[i].loteQty = aAllSlotsD[i + 1].loteQty;
                     aAllSlotsD[i].loteUom = aAllSlotsD[i + 1].loteUom;
                 }
-                aAllSlotsD[aAllSlotsD.length - 1].value   = "";
+                aAllSlotsD[aAllSlotsD.length - 1].value = "";
                 aAllSlotsD[aAllSlotsD.length - 1].loteQty = "";
                 aAllSlotsD[aAllSlotsD.length - 1].loteUom = "";
 
@@ -1257,7 +1248,7 @@ sap.ui.define([
 
                 // Incrementar contador global compartido
                 this.iSecuenciaCounter++;
-                aAllSlotsProc[iIndex].value   = sBarcode + "!" + (sCantidadLote || "0.00") + "!" + this.iSecuenciaCounter;
+                aAllSlotsProc[iIndex].value = sBarcode + "!" + (sCantidadLote || "0.00") + "!" + this.iSecuenciaCounter;
                 aAllSlotsProc[iIndex].loteQty = sCantidadLote || "";
                 aAllSlotsProc[iIndex].loteUom = sUomLote || "";
                 aAllSlotsProc[iIndex].cantidadAsignada = sCantidadLote || "";
@@ -1475,7 +1466,7 @@ sap.ui.define([
 
             // /cantidadEscaneada  → fila Alambre → idSlotTableAlm (aItemsAlm)
             // /cantidadEscaneada2 → fila Solera  → idSlotTableSol (aItemsSol)
-            oOrderSummaryModel.setProperty("/cantidadEscaneada",  Number(fnSumQty(aItemsAlm).toFixed(2)));
+            oOrderSummaryModel.setProperty("/cantidadEscaneada", Number(fnSumQty(aItemsAlm).toFixed(2)));
             oOrderSummaryModel.setProperty("/cantidadEscaneada2", Number(fnSumQty(aItemsSol).toFixed(2)));
         },
         /**
@@ -1497,15 +1488,15 @@ sap.ui.define([
             var sMaterial, nCantidadRequerida, sFragId, sDialogId;
             if (sGrupo === "ALM") {
                 // Alambre → usa /material (comp1) → dialog Alm
-                sMaterial          = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material")         : "";
+                sMaterial = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material") : "";
                 nCantidadRequerida = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/cantidadNecesaria") : 0;
-                sFragId   = oView.getId() + "--Alm";
+                sFragId = oView.getId() + "--Alm";
                 sDialogId = "Alm--batchListDialog";
             } else {
                 // Solera → usa /material2 (comp2) → dialog Sol
-                sMaterial          = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material2")          : "";
+                sMaterial = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material2") : "";
                 nCantidadRequerida = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/cantidadNecesaria2") : 0;
-                sFragId   = oView.getId();
+                sFragId = oView.getId();
                 sDialogId = "batchListDialog";
             }
 
@@ -1612,6 +1603,33 @@ sap.ui.define([
             if (oPopover && !oPopover.bIsDestroyed) {
                 oPopover.setBusy(false);
             }
+        },
+        _getCurrentOperationStatus: function () {
+            var oPodSelectionModel = this.getPodSelectionModel();
+            var sCurrentStatus = "";
+
+
+            if (oPodSelectionModel && oPodSelectionModel.selectedPhaseData) {
+                sCurrentStatus = oPodSelectionModel.selectedPhaseData.status || "";
+            }
+
+            if (!sCurrentStatus) {
+                var operation = (oPodSelectionModel && typeof oPodSelectionModel.getOperation === "function")
+                    ? (oPodSelectionModel.getOperation() && oPodSelectionModel.getOperation().operation)
+                    : null;
+                if (!operation && gOperationPhase && gOperationPhase.operation) {
+                    operation = gOperationPhase.operation.operation || gOperationPhase.operation;
+                }
+                if (operation) {
+                    sCurrentStatus = operation.status || operation.operationStatus || "";
+                }
+            }
+
+            if (!sCurrentStatus && gOperationPhase) {
+                sCurrentStatus = gOperationPhase.status || "";
+            }
+
+            return sCurrentStatus;
         },
         getHeaderMaterial: function (sParams, oSapApi) {
             return new Promise((resolve, reject) => {
