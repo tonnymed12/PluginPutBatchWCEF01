@@ -27,7 +27,8 @@ sap.ui.define([],
 
         //  Searches for work centers by plant and work center values
         WORKCENTERS : "workcenter/v2/workcenters",
-
+        // Get Goods Issue summary results for an order, sfc, operationActivity, stepId and plant.
+        GOODSISSUES_SUMMARY: "processorder/v2/goodsIssue/summary",
 
 
         /** API CONSUMPTION TYPE : PUT  */

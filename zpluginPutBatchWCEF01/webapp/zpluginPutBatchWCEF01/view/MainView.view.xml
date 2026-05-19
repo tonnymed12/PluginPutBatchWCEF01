@@ -43,11 +43,11 @@
         <HBox width="97%" class="sapUiSmallMarginBeginEnd sapUiTinyMarginBottom" alignItems="Center">
             <VBox width="85px"/>
             <VBox width="18%" class="sapUiSmallMarginEnd"><Label text="{i18n>materialCode}"/></VBox>
-            <VBox width="30%" class="sapUiSmallMarginEnd"><Label text="{i18n>descripcionMaterial}"/></VBox>
-            <VBox width="12%" class="sapUiSmallMarginEnd"><Label text="{i18n>cantidadNecesaria}"/></VBox>
-            <VBox width="8%" class="sapUiSmallMarginEnd"><Label text="{i18n>unidadMedida}"/></VBox>
-            <VBox width="12%" ><Label text="{i18n>cantidadEscaneada}"/></VBox>
-
+            <VBox width="26%" class="sapUiSmallMarginEnd"><Label text="{i18n>descripcionMaterial}"/></VBox>
+            <VBox width="10%" class="sapUiSmallMarginEnd"><Label text="{i18n>cantidadNecesaria}"/></VBox>
+            <VBox width="12%" class="sapUiSmallMarginEnd"><Label text="{i18n>cantidadConsumida}"/></VBox>
+            <VBox width="10%" class="sapUiSmallMarginEnd"><Label text="{i18n>cantidadEscaneada}"/></VBox>
+            <VBox width="8%"><Label text="{i18n>unidadMedida}"/></VBox>
         </HBox>
 
         <!-- Fila Mat 1 (/material = Alambre, UoM M) -->
@@ -56,17 +56,20 @@
             <VBox width="18%" class="sapUiSmallMarginEnd">
                 <Input id="orderMaterial" value="{orderSummary>/material}" enabled="false" width="100%"/>
             </VBox>
-            <VBox width="30%" class="sapUiSmallMarginEnd">
+            <VBox width="26%" class="sapUiSmallMarginEnd">
                 <Input id="orderDescripcion" value="{orderSummary>/descripcion}" enabled="false" width="100%"/>
             </VBox>
-            <VBox width="12%" class="sapUiSmallMarginEnd">
+            <VBox width="10%" class="sapUiSmallMarginEnd">
                 <Input id="orderCantidadNecesaria" value="{orderSummary>/cantidadNecesaria}" enabled="false" width="100%"/>
             </VBox>
-            <VBox width="8%" class="sapUiSmallMarginEnd">
-                <Input id="orderUnidadMedida" value="{orderSummary>/unidadMedida}" enabled="false" width="100%"/>
+            <VBox width="12%" class="sapUiSmallMarginEnd">
+                <Input id="orderCantidadConsumida" value="{orderSummary>/cantidadConsumida}" enabled="false" width="100%"/>
             </VBox>
-            <VBox width="12%" >
+            <VBox width="10%" class="sapUiSmallMarginEnd">
                 <Input id="orderCantidadEscaneada" value="{orderSummary>/cantidadEscaneada}" enabled="false" width="100%"/>
+            </VBox>
+            <VBox width="8%">
+                <Input id="orderUnidadMedida" value="{orderSummary>/unidadMedida}" enabled="false" width="100%"/>
             </VBox>
         </HBox>
 
@@ -76,17 +79,20 @@
             <VBox width="18%" class="sapUiSmallMarginEnd">
                 <Input id="orderMaterial2" value="{orderSummary>/material2}" enabled="false" width="100%"/>
             </VBox>
-            <VBox width="30%" class="sapUiSmallMarginEnd">
+            <VBox width="26%" class="sapUiSmallMarginEnd">
                 <Input id="orderDescripcion2" value="{orderSummary>/descripcion2}" enabled="false" width="100%"/>
             </VBox>
-            <VBox width="12%" class="sapUiSmallMarginEnd">
+            <VBox width="10%" class="sapUiSmallMarginEnd">
                 <Input id="orderCantidadNecesaria2" value="{orderSummary>/cantidadNecesaria2}" enabled="false" width="100%"/>
             </VBox>
-            <VBox width="8%" class="sapUiSmallMarginEnd">
-                <Input id="orderUnidadMedida2" value="{orderSummary>/unidadMedida2}" enabled="false" width="100%"/>
+            <VBox width="12%" class="sapUiSmallMarginEnd">
+                <Input id="orderCantidadConsumida2" value="{orderSummary>/cantidadConsumida2}" enabled="false" width="100%"/>
             </VBox>
-            <VBox width="12%">
+            <VBox width="10%" class="sapUiSmallMarginEnd">
                 <Input id="orderCantidadEscaneada2" value="{orderSummary>/cantidadEscaneada2}" enabled="false" width="100%"/>
+            </VBox>
+            <VBox width="8%">
+                <Input id="orderUnidadMedida2" value="{orderSummary>/unidadMedida2}" enabled="false" width="100%"/>
             </VBox>
         </HBox>
 

@@ -34,6 +34,8 @@ sap.ui.define([
                 descripcion2: "",
                 cantidadNecesaria: 0,
                 cantidadNecesaria2: 0,
+                cantidadConsumida: 0,
+                cantidadConsumida2: 0,
                 cantidadEscaneada: 0,
                 cantidadEscaneada2: 0,
                 unidadMedida: "",
@@ -389,8 +391,8 @@ sap.ui.define([
             }
 
             // Vaciar todos los valores de ambas tablas en memoria
-            aItemsSol.forEach(function (item) { item.value = ""; item.loteQty = ""; item.loteUom = ""; });
-            aItemsAlm.forEach(function (item) { item.value = ""; item.loteQty = ""; item.loteUom = ""; });
+            aItemsSol.forEach(function (item) { item.value = ""; item.loteQty = ""; item.loteUom = ""; item.cantidadAsignada = ""; });
+            aItemsAlm.forEach(function (item) { item.value = ""; item.loteQty = ""; item.loteUom = ""; item.cantidadAsignada = ""; });
 
             if (oModelSol) { oModelSol.setProperty("/ITEMS", aItemsSol); oModelSol.refresh(true); }
             if (oModelAlm) { oModelAlm.setProperty("/ITEMS", aItemsAlm); oModelAlm.refresh(true); }
@@ -599,7 +601,9 @@ sap.ui.define([
                                 // Detectar de dónde vino el escaneo
                                 if (!this._slotContext) {
                                     // Viene del input superior → buscar slot vacío
-                                    this._ejecutarUpdate(sCantidadLote, sUomLote);
+                                    // Pasar el barcode capturado ANTES de la validación async para
+                                    // evitar race condition si el input fue limpiado durante la espera.
+                                    this._ejecutarUpdate(sCantidadLote, sUomLote, materialEscaneado + "!" + loteEscaneado);
                                 } else {
                                     // Viene del botón por fila → actualizar ese slot
                                     this._slotContext.loteQty = sCantidadLote;
@@ -756,10 +760,12 @@ sap.ui.define([
          * @param {string} sCantidadLote - Cantidad del lote formateada (ej: "150.00")
          * @param {string} sUomLote - Unidad de medida del lote formateada (ej: "KG")
          */
-        _ejecutarUpdate: function (sCantidadLote, sUomLote) {
+        _ejecutarUpdate: function (sCantidadLote, sUomLote, sBarcodeIn) {
             const oView = this.getView();
             const oInput = oView.byId("scanInput");
-            const sBarcode = oInput.getValue().trim();
+            // Usar el barcode capturado antes de la validación async (evita race condition
+            // si el input fue limpiado mientras se esperaba la respuesta del servidor).
+            const sBarcode = (sBarcodeIn || oInput.getValue()).trim();
             const oPODParams = this.Commons.getPODParams(this.getOwnerComponent());
             const oBundle = oView.getModel("i18n").getResourceBundle();
 
@@ -1021,11 +1027,14 @@ sap.ui.define([
                     }
                 }
 
+                var partsDeleted = sValueToDelete.split('!');
+                var sMaterialLoteDeleted = partsDeleted.slice(0, 2).join('!');
                 var oSapApi = this.getPublicApiRestDataSourceUri();
                 this.setCustomValuesPp({
                     inCustomValues: aCustomValuesFinal,
                     inPlant: oPODParams.PLANT_ID,
-                    inWorkCenter: oPODParams.WORK_CENTER
+                    inWorkCenter: oPODParams.WORK_CENTER,
+                    inMaterialLote: sMaterialLoteDeleted
                 }, oSapApi).then(function () {
                     sap.m.MessageToast.show(oBundle.getText("loteActualizadoAntesEliminar"));
                 }).catch(function () {
@@ -1150,7 +1159,8 @@ sap.ui.define([
                 this.setCustomValuesPp({
                     inCustomValues: aCustomValuesFinal,
                     inPlant: oPODParams.PLANT_ID,
-                    inWorkCenter: oPODParams.WORK_CENTER
+                    inWorkCenter: oPODParams.WORK_CENTER,
+                    inMaterialLote: sMaterialLoteRef
                 }, oSapApi).then(function () {
                     sap.m.MessageToast.show(oBundle.getText("cantidadActualizada"));
                 }).catch(function () {
@@ -1467,11 +1477,13 @@ sap.ui.define([
 
                     oOrderSummaryModel.setProperty("/material", sMaterial1);
                     oOrderSummaryModel.setProperty("/cantidadNecesaria", Number(oComp1.totalQuantity || 0));
+                    oOrderSummaryModel.setProperty("/cantidadConsumida", 0);
                     oOrderSummaryModel.setProperty("/unidadMedida", oComp1.unitOfMeasure || "");
 
                     if (oComp2) {
                         oOrderSummaryModel.setProperty("/material2", sMaterial2);
                         oOrderSummaryModel.setProperty("/cantidadNecesaria2", Number(oComp2.totalQuantity || 0));
+                        oOrderSummaryModel.setProperty("/cantidadConsumida2", 0);
                         oOrderSummaryModel.setProperty("/unidadMedida2", oComp2.unitOfMeasure || "");
                     }
 
@@ -1495,6 +1507,30 @@ sap.ui.define([
                             if (oComp2) {
                                 oOrderSummaryModel.setProperty("/descripcion2", descripcion2);
                                 oOrderSummaryModel.setProperty("/labelSol", descripcion2 || sMaterial2 || "Mat 2");
+                            }
+
+                            // Encadenar consulta de cantidad consumida (GoodsIssue)
+                            return this.getGoodsIssueSummary({
+                                plant: oPODParams.PLANT_ID,
+                                order: oPODParams.ORDER_ID,
+                                sfc: oPODParams.SFC,
+                                operationActivity: oPODParams.OPERATION_ACTIVITY,
+                                stepId: oPODParams.STEP_ID
+                            }, oSapApi).catch(function () { return null; }); // Fallo silencioso: sin consumo
+
+                        }.bind(this))
+                        .then(function (oGoodsData) {
+                            // Mapear cantidadConsumida por material desde lineItems
+                            var aLineItems = (oGoodsData && Array.isArray(oGoodsData.lineItems)) ? oGoodsData.lineItems : [];
+                            var oConsumoMap = {};
+                            aLineItems.forEach(function (oItem) {
+                                var sMat = (oItem.materialId && oItem.materialId.material) || "";
+                                var nConsumo = (oItem.consumedQuantity && oItem.consumedQuantity.value) || 0;
+                                if (sMat) { oConsumoMap[sMat.toUpperCase()] = nConsumo; }
+                            });
+                            oOrderSummaryModel.setProperty("/cantidadConsumida", oConsumoMap[(sMaterial1 || "").toUpperCase()] || 0);
+                            if (oComp2) {
+                                oOrderSummaryModel.setProperty("/cantidadConsumida2", oConsumoMap[(sMaterial2 || "").toUpperCase()] || 0);
                             }
 
                             this._updateOrderSummaryScannedQty(
@@ -1646,8 +1682,11 @@ sap.ui.define([
             );
         },
         onConfirmSendBatchChars: function () {
-            var oPopover = this.byId("batchListDialog");
-            if (oPopover) { oPopover.close(); }
+            // Cubrir ambos dialogs (SOL usa "batchListDialog", ALM usa "Alm--batchListDialog")
+            var oDialogSol = this.byId("batchListDialog");
+            var oDialogAlm = this.byId("Alm--batchListDialog");
+            if (oDialogSol) { oDialogSol.close(); }
+            if (oDialogAlm) { oDialogAlm.close(); }
         },
         onCopiarCodigo: function (oEvent) {
             var oBundle = this.getView().getModel("i18n").getResourceBundle();
@@ -1669,18 +1708,33 @@ sap.ui.define([
         },
         //Funcion que cierra el fragmento de inventario almacen 
         onCloseDialogBatchChars: function (oEvent) {
-            this.byId("batchListDialog").destroy();
+            // Cubrir ambos dialogs (SOL usa "batchListDialog", ALM usa "Alm--batchListDialog")
+            var oDialogSol = this.byId("batchListDialog");
+            var oDialogAlm = this.byId("Alm--batchListDialog");
+            if (oDialogSol) { oDialogSol.close(); }
+            if (oDialogAlm) { oDialogAlm.close(); }
         },
         // Limpia el estado busy al cerrar el popover (por cualquier causa: X, clic fuera, boton)
         onAfterClosePopoverInventario: function () {
-            var oPopover = this.byId("batchListDialog");
-            if (oPopover && !oPopover.bIsDestroyed) {
-                oPopover.setBusy(false);
-            }
+            // Cubrir ambos dialogs (SOL y ALM)
+            ["batchListDialog", "Alm--batchListDialog"].forEach(function (sId) {
+                var oPopover = this.byId(sId);
+                if (oPopover && !oPopover.bIsDestroyed) { oPopover.setBusy(false); }
+            }.bind(this));
         },
         getHeaderMaterial: function (sParams, oSapApi) {
             return new Promise((resolve, reject) => {
                 this.ajaxGetRequest(oSapApi + this.ApiPaths.HEADER_MATERIAL, sParams, function (oRes) {
+                    resolve(oRes);
+                }.bind(this),
+                    function (oRes) {
+                        reject(oRes);
+                    }.bind(this));
+            });
+        },
+        getGoodsIssueSummary: function (sParams, oSapApi) {
+            return new Promise((resolve, reject) => {
+                this.ajaxGetRequest(oSapApi + this.ApiPaths.GOODSISSUES_SUMMARY, sParams, function (oRes) {
                     resolve(oRes);
                 }.bind(this),
                     function (oRes) {
