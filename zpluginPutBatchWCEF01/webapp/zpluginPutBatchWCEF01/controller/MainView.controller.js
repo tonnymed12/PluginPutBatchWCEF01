@@ -821,7 +821,10 @@ sap.ui.define([
 
                 // Incrementar contador global compartido
                 this.iSecuenciaCounter++;
-                oEmptySlot.value = sBarcode + "!" + (sCantidadLote || "0.00") + "!" + this.iSecuenciaCounter;
+                // Formato: MAT!LOTE!CANTIDAD_ASIGNADA!SEQ!CANTIDAD_PENDIENTE
+                // CANTIDAD_PENDIENTE inicia igual a CANTIDAD_ASIGNADA; el proceso EM la reduce.
+                var sCantidadPendInit = sCantidadLote || "0.00";
+                oEmptySlot.value = sBarcode + "!" + (sCantidadLote || "0.00") + "!" + this.iSecuenciaCounter + "!" + sCantidadPendInit;
                 oEmptySlot.loteQty = sCantidadLote || "";
                 oEmptySlot.loteUom = sUomLote || "";
                 oEmptySlot.cantidadAsignada = sCantidadLote || "";
@@ -980,9 +983,11 @@ sap.ui.define([
                     var aPartes = sValorActual.split('!');
                     if (aPartes.length >= 2) {
                         iNuevaSecuencia++;
-                        // Preservar CANTIDAD si existe (formato 4 partes: MAT!LOTE!CANTIDAD!SEQ)
+                        // Preservar CANTIDAD y CANTIDAD_PENDIENTE al renumerar
+                        // Formato 5 partes: MAT!LOTE!CANTIDAD!SEQ!CANTIDAD_PENDIENTE
                         var sCantidad = aPartes.length >= 4 ? aPartes[2] : (slot.cantidadAsignada || "");
-                        slot.value = aPartes[0] + "!" + aPartes[1] + (sCantidad ? "!" + sCantidad : "") + "!" + iNuevaSecuencia;
+                        var sCantPend = aPartes.length >= 5 ? aPartes[4] : sCantidad;
+                        slot.value = aPartes[0] + "!" + aPartes[1] + (sCantidad ? "!" + sCantidad : "") + "!" + iNuevaSecuencia + (sCantPend ? "!" + sCantPend : "");
                     }
                 });
                 // Actualizar contador global único
@@ -1112,13 +1117,14 @@ sap.ui.define([
                     return;
                 }
 
-                // Rebuild value: MAT!LOTE!NUEVA_CANTIDAD!SECUENCIA
+                // Rebuild value: MAT!LOTE!NUEVA_CANTIDAD!SECUENCIA!CANTIDAD_PENDIENTE
                 var sCantidadFormatted = nNewCantidad.toFixed(2);
                 var currentParts = aAllSlots[iIndex].value.split('!');
                 // Secuencia: parts[3] en nuevo formato, parts[2] en viejo
                 var sSecuencia = currentParts.length >= 4 ? currentParts[3] : (currentParts[2] || "");
+                // Al cambiar CANTIDAD_ASIGNADA, CANTIDAD_PENDIENTE se resetea al nuevo valor
                 aAllSlots[iIndex].cantidadAsignada = sCantidadFormatted;
-                aAllSlots[iIndex].value = currentParts[0] + "!" + currentParts[1] + "!" + sCantidadFormatted + "!" + sSecuencia;
+                aAllSlots[iIndex].value = currentParts[0] + "!" + currentParts[1] + "!" + sCantidadFormatted + "!" + sSecuencia + "!" + sCantidadFormatted;
 
                 // Re-rutear y actualizar AMBAS tablas
                 var oRoutedUpd = this._routeSlotsToTables(aAllSlots, oRefresh.iQtySol, oRefresh.iQtyAlm);
@@ -1296,7 +1302,9 @@ sap.ui.define([
 
                 // Incrementar contador global compartido
                 this.iSecuenciaCounter++;
-                aAllSlotsProc[iIndex].value   = sBarcode + "!" + (sCantidadLote || "0.00") + "!" + this.iSecuenciaCounter;
+                // Formato: MAT!LOTE!CANTIDAD_ASIGNADA!SEQ!CANTIDAD_PENDIENTE
+                var sCantidadPendProc = sCantidadLote || "0.00";
+                aAllSlotsProc[iIndex].value   = sBarcode + "!" + (sCantidadLote || "0.00") + "!" + this.iSecuenciaCounter + "!" + sCantidadPendProc;
                 aAllSlotsProc[iIndex].loteQty = sCantidadLote || "";
                 aAllSlotsProc[iIndex].loteUom = sUomLote || "";
                 aAllSlotsProc[iIndex].cantidadAsignada = sCantidadLote || "";
