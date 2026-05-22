@@ -24,6 +24,7 @@ sap.ui.define([
             this._oScanDebounceTimer = null; // Timer para auto-submit al escanear con pistola física
             this.iSecuenciaCounter = 0;    // Contador global compartido entre ambas tablas (Slot001, Slot002...)
             this.sAcActivity = "";         // Guardar valor AC_ACTIVITY del puesto
+            this._solConvFactor = null;    // { factor, uom } para conversión KG→PC del material Solera
 
             // Modelo "orderSummary" 
             const oOrderSummaryModel = new JSONModel({
@@ -188,7 +189,7 @@ sap.ui.define([
          */
         _routeSlotsToTables: function (aAllSlots, iQtySol, iQtyAlm) {
             var oOrderSummaryModel = this.getView().getModel("orderSummary");
-            var sMatAlm = oOrderSummaryModel ? (oOrderSummaryModel.getProperty("/material")  || "").toUpperCase() : "";
+            var sMatAlm = oOrderSummaryModel ? (oOrderSummaryModel.getProperty("/material") || "").toUpperCase() : "";
             var sMatSol = oOrderSummaryModel ? (oOrderSummaryModel.getProperty("/material2") || "").toUpperCase() : "";
 
             var aFilledAlm = [], aFilledSol = [], aEmpty = [];
@@ -314,6 +315,9 @@ sap.ui.define([
 
             oView.byId("idPluginPanel").setBusy(true);
 
+            // Detectar material Solera para aplicar conversión KG→PC
+            var sMatSolRefresh = (oView.getModel("orderSummary") ? (oView.getModel("orderSummary").getProperty("/material2") || "") : "").toUpperCase();
+
             // Una promesa por cada slot (ambas tablas)
             var aPromises = aSlotsConValor.map(function (slot) {
                 var parts = slot.value.split('!');
@@ -332,8 +336,15 @@ sap.ui.define([
                 return new Promise(function (resolve) {
                     this.ajaxPostRequest(urlLote, inParams,
                         function (oRes) {
-                            slot.loteQty = this._formatLoteQty(oRes.outCantidadLote);
-                            slot.loteUom = oRes.outOUMLote || "";
+                            var bIsSolR = sMatSolRefresh && sMaterial.toUpperCase() === sMatSolRefresh;
+                            if (bIsSolR && this._solConvFactor && this._solConvFactor.factor !== 1) {
+                                var fPcR = parseFloat(oRes.outCantidadLote || 0) * this._solConvFactor.factor;
+                                slot.loteQty = fPcR.toFixed(2);
+                                slot.loteUom = this._solConvFactor.uom;
+                            } else {
+                                slot.loteQty = this._formatLoteQty(oRes.outCantidadLote);
+                                slot.loteUom = oRes.outOUMLote || "";
+                            }
                             resolve({ slot: slot, ok: true });
                         }.bind(this),
                         function () {
@@ -597,7 +608,7 @@ sap.ui.define([
 
                             if (bEsValido) {
                                 const sCantidadLote = this._formatLoteQty(oResponseData.outCantidadLote);
-                                const sUomLote =  oResponseData.outOUMLote;
+                                const sUomLote = oResponseData.outOUMLote;
                                 // Detectar de dónde vino el escaneo
                                 if (!this._slotContext) {
                                     // Viene del input superior → buscar slot vacío
@@ -655,6 +666,42 @@ sap.ui.define([
             return isNaN(n) ? "" : n.toFixed(2);
         },
         /**
+         * Obtiene el factor de conversión de la UoM base a la UoM alternativa desde la API de materiales.
+         * Ejemplo Solera: base=KG, alternativa=ST(PC). Factor = denominator/numerator = 100/1454.
+         * @returns {Promise<{factor: number, uom: string}>}
+         */
+        _fetchMaterialConversionFactor: function (sMaterial, sPlant, oSapApi) {
+            return new Promise(function (resolve) {
+                this.ajaxGetRequest(
+                    oSapApi + this.ApiPaths.MATERIALS,
+                    { material: sMaterial, plant: sPlant },
+                    function (oRes) {
+                        var aData = Array.isArray(oRes) ? oRes : (oRes ? [oRes] : []);
+                        var oMat = aData[0];
+                        if (!oMat || !Array.isArray(oMat.alternateUnitsOfMeasure)) {
+                            resolve({ factor: 1, uom: "" });
+                            return;
+                        }
+                        // Solo convertir si existe una UoM alternativa ST (piezas)
+                        // Materiales configurables pueden tener únicamente KG → sin conversión
+                        var oAlt = oMat.alternateUnitsOfMeasure.find(function (u) {
+                            return (u.uom || "").toUpperCase() === "ST"
+                                && u.denominator > 0 && u.numerator > 0;
+                        });
+                        if (!oAlt) {
+                            resolve({ factor: 1, uom: (oMat.unitOfMeasure || "") });
+                            return;
+                        }
+                        // KG → ST(PC): multiply by (denominator / numerator)
+                        resolve({ factor: oAlt.denominator / oAlt.numerator, uom: oAlt.uom });
+                    }.bind(this),
+                    function () {
+                        resolve({ factor: 1, uom: "" }); // sin conversión en caso de error
+                    }.bind(this)
+                );
+            }.bind(this));
+        },
+        /**
          * Refresca los slots de un GRUPO (SOL o ALM) desde el backend.
          * Paso 6 reescribirá esto para manejar los dos grupos en paralelo.
          * @param {"SOL"|"ALM"} sGrupo - Grupo a refrescar (default "SOL")
@@ -698,6 +745,7 @@ sap.ui.define([
 
                 // Construir pool global Slot001...SlotN y restaurar loteQty/loteUom
                 var aAllSlots = this._getAllSlotsAsArray(aCustomValues, iTotalSlots);
+                var sMatSolRsb = (this.getView().getModel("orderSummary") ? (this.getView().getModel("orderSummary").getProperty("/material2") || "") : "").toUpperCase();
                 aAllSlots.forEach(function (slot) {
                     if (slot.value) {
                         var parts = slot.value.split('!');
@@ -707,8 +755,16 @@ sap.ui.define([
                         slot.loteUom = (oLQ && oLQ.loteUom) || "";
                         // Restaurar cantidadAsignada: desde el value (nuevo formato) o fallback a loteQty
                         slot.cantidadAsignada = parts.length >= 4 ? (parts[2] || "") : (slot.loteQty || "");
+                        // Conversión KG→PC para slots Solera (cantidadAsignada viene en KG desde backend)
+                        var bIsSolRsb = sMatSolRsb && (parts[0] || "").toUpperCase() === sMatSolRsb;
+                        if (bIsSolRsb && this._solConvFactor && this._solConvFactor.factor !== 1) {
+                            var fKgRsb = parseFloat(slot.cantidadAsignada);
+                            if (!isNaN(fKgRsb) && fKgRsb > 0) {
+                                slot.cantidadAsignada = (fKgRsb * this._solConvFactor.factor).toFixed(2);
+                            }
+                        }
                     }
-                });
+                }.bind(this));
 
                 // Rutear a tablas y actualizar AMBOS modelos
                 var oRouted = this._routeSlotsToTables(aAllSlots, iQtySol, iQtyAlm);
@@ -828,6 +884,13 @@ sap.ui.define([
                 oEmptySlot.loteQty = sCantidadLote || "";
                 oEmptySlot.loteUom = sUomLote || "";
                 oEmptySlot.cantidadAsignada = sCantidadLote || "";
+                // Conversión KG→PC para display de lotes Solera (slot.value conserva KG)
+                if (sGrupo === "SOL" && this._solConvFactor && this._solConvFactor.factor !== 1) {
+                    var fPcEj = parseFloat(sCantidadLote || 0) * this._solConvFactor.factor;
+                    oEmptySlot.loteQty = fPcEj.toFixed(2);
+                    oEmptySlot.loteUom = this._solConvFactor.uom;
+                    oEmptySlot.cantidadAsignada = fPcEj.toFixed(2);
+                }
 
                 // Re-rutear y actualizar AMBAS tablas
                 const oRoutedUpd = this._routeSlotsToTables(aAllSlots, oRefresh.iQtySol, oRefresh.iQtyAlm);
@@ -967,11 +1030,11 @@ sap.ui.define([
 
                 // Recorrer hacia arriba globalmente (ambas tablas como una sola lista)
                 for (var i = iIndex; i < aAllSlotsD.length - 1; i++) {
-                    aAllSlotsD[i].value   = aAllSlotsD[i + 1].value;
+                    aAllSlotsD[i].value = aAllSlotsD[i + 1].value;
                     aAllSlotsD[i].loteQty = aAllSlotsD[i + 1].loteQty;
                     aAllSlotsD[i].loteUom = aAllSlotsD[i + 1].loteUom;
                 }
-                aAllSlotsD[aAllSlotsD.length - 1].value   = "";
+                aAllSlotsD[aAllSlotsD.length - 1].value = "";
                 aAllSlotsD[aAllSlotsD.length - 1].loteQty = "";
                 aAllSlotsD[aAllSlotsD.length - 1].loteUom = "";
 
@@ -1122,9 +1185,14 @@ sap.ui.define([
                 var currentParts = aAllSlots[iIndex].value.split('!');
                 // Secuencia: parts[3] en nuevo formato, parts[2] en viejo
                 var sSecuencia = currentParts.length >= 4 ? currentParts[3] : (currentParts[2] || "");
+                // Para slots SOL: nNewCantidad está en PC; revertir a KG para el backend (slot.value)
+                var sCantidadParaBackend = sCantidadFormatted;
+                if (sGrupo === "SOL" && this._solConvFactor && this._solConvFactor.factor !== 1) {
+                    sCantidadParaBackend = (nNewCantidad / this._solConvFactor.factor).toFixed(2);
+                }
                 // Al cambiar CANTIDAD_ASIGNADA, CANTIDAD_PENDIENTE se resetea al nuevo valor
                 aAllSlots[iIndex].cantidadAsignada = sCantidadFormatted;
-                aAllSlots[iIndex].value = currentParts[0] + "!" + currentParts[1] + "!" + sCantidadFormatted + "!" + sSecuencia + "!" + sCantidadFormatted;
+                aAllSlots[iIndex].value = currentParts[0] + "!" + currentParts[1] + "!" + sCantidadParaBackend + "!" + sSecuencia + "!" + sCantidadParaBackend;
 
                 // Re-rutear y actualizar AMBAS tablas
                 var oRoutedUpd = this._routeSlotsToTables(aAllSlots, oRefresh.iQtySol, oRefresh.iQtyAlm);
@@ -1304,10 +1372,17 @@ sap.ui.define([
                 this.iSecuenciaCounter++;
                 // Formato: MAT!LOTE!CANTIDAD_ASIGNADA!SEQ!CANTIDAD_PENDIENTE
                 var sCantidadPendProc = sCantidadLote || "0.00";
-                aAllSlotsProc[iIndex].value   = sBarcode + "!" + (sCantidadLote || "0.00") + "!" + this.iSecuenciaCounter + "!" + sCantidadPendProc;
+                aAllSlotsProc[iIndex].value = sBarcode + "!" + (sCantidadLote || "0.00") + "!" + this.iSecuenciaCounter + "!" + sCantidadPendProc;
                 aAllSlotsProc[iIndex].loteQty = sCantidadLote || "";
                 aAllSlotsProc[iIndex].loteUom = sUomLote || "";
                 aAllSlotsProc[iIndex].cantidadAsignada = sCantidadLote || "";
+                // Conversión KG→PC para display de lotes Solera (slot.value conserva KG)
+                if (sGrupo === "SOL" && this._solConvFactor && this._solConvFactor.factor !== 1) {
+                    var fPcProc = parseFloat(sCantidadLote || 0) * this._solConvFactor.factor;
+                    aAllSlotsProc[iIndex].loteQty = fPcProc.toFixed(2);
+                    aAllSlotsProc[iIndex].loteUom = this._solConvFactor.uom;
+                    aAllSlotsProc[iIndex].cantidadAsignada = fPcProc.toFixed(2);
+                }
 
                 // Re-rutear y actualizar AMBAS tablas
                 const oView = this.getView();
@@ -1383,6 +1458,7 @@ sap.ui.define([
             }
             gOperationPhase = oData;
             this.onGetCustomValues();
+            this.setOrderSummary();
 
         },
         isSubscribingToNotifications: function () {
@@ -1499,7 +1575,10 @@ sap.ui.define([
                         this.getHeaderMaterial({ material: sMaterial1, plant: oPODParams.PLANT_ID }, oSapApi),
                         oComp2
                             ? this.getHeaderMaterial({ material: sMaterial2, plant: oPODParams.PLANT_ID }, oSapApi)
-                            : Promise.resolve(null)
+                            : Promise.resolve(null),
+                        oComp2
+                            ? this._fetchMaterialConversionFactor(sMaterial2, oPODParams.PLANT_ID, oSapApi)
+                            : Promise.resolve({ factor: 1, uom: "" })
                     ];
 
                     Promise.all(aPromesas)
@@ -1515,6 +1594,33 @@ sap.ui.define([
                             if (oComp2) {
                                 oOrderSummaryModel.setProperty("/descripcion2", descripcion2);
                                 oOrderSummaryModel.setProperty("/labelSol", descripcion2 || sMaterial2 || "Mat 2");
+                            }
+
+                            // Aplicar factor de conversión KG→PC al material Solera
+                            const oConv = headerData[2] || { factor: 1, uom: "" };
+                            this._solConvFactor = oConv;
+                            if (oComp2 && oConv.factor !== 1) {
+                                const nNec2Pc = Number((Number(oComp2.totalQuantity || 0) * oConv.factor).toFixed(2));
+                                oOrderSummaryModel.setProperty("/cantidadNecesaria2", nNec2Pc);
+                                oOrderSummaryModel.setProperty("/unidadMedida2", oConv.uom);
+                                // Retroactivamente convertir cantidadAsignada de slots SOL ya cargados
+                                var oTableSolS = this.byId("idSlotTableSol");
+                                var oModelSolS = oTableSolS ? oTableSolS.getModel() : null;
+                                if (oModelSolS) {
+                                    var aItemsSolS = oModelSolS.getProperty("/ITEMS") || [];
+                                    var bChanged = false;
+                                    aItemsSolS.forEach(function (slot) {
+                                        if (!slot.value) { return; }
+                                        // Leer KG desde slot.value para evitar doble conversión
+                                        var aParts = slot.value.split('!');
+                                        var fKgS = parseFloat(aParts.length >= 4 ? aParts[2] : (slot.cantidadAsignada || ""));
+                                        if (!isNaN(fKgS) && fKgS > 0) {
+                                            slot.cantidadAsignada = (fKgS * oConv.factor).toFixed(2);
+                                            bChanged = true;
+                                        }
+                                    });
+                                    if (bChanged) { oModelSolS.refresh(true); }
+                                }
                             }
 
                             // Encadenar consulta de cantidad consumida (GoodsIssue)
@@ -1538,7 +1644,11 @@ sap.ui.define([
                             });
                             oOrderSummaryModel.setProperty("/cantidadConsumida", oConsumoMap[(sMaterial1 || "").toUpperCase()] || 0);
                             if (oComp2) {
-                                oOrderSummaryModel.setProperty("/cantidadConsumida2", oConsumoMap[(sMaterial2 || "").toUpperCase()] || 0);
+                                var nConsumo2Kg = oConsumoMap[(sMaterial2 || "").toUpperCase()] || 0;
+                                var nConsumo2Display = (this._solConvFactor && this._solConvFactor.factor !== 1)
+                                    ? Number((nConsumo2Kg * this._solConvFactor.factor).toFixed(2))
+                                    : nConsumo2Kg;
+                                oOrderSummaryModel.setProperty("/cantidadConsumida2", nConsumo2Display);
                             }
 
                             this._updateOrderSummaryScannedQty(
@@ -1584,7 +1694,7 @@ sap.ui.define([
 
             // /cantidadEscaneada  → fila Alambre → idSlotTableAlm (aItemsAlm)
             // /cantidadEscaneada2 → fila Solera  → idSlotTableSol (aItemsSol)
-            oOrderSummaryModel.setProperty("/cantidadEscaneada",  Number(fnSumQty(aItemsAlm).toFixed(2)));
+            oOrderSummaryModel.setProperty("/cantidadEscaneada", Number(fnSumQty(aItemsAlm).toFixed(2)));
             oOrderSummaryModel.setProperty("/cantidadEscaneada2", Number(fnSumQty(aItemsSol).toFixed(2)));
         },
         /**
@@ -1606,15 +1716,15 @@ sap.ui.define([
             var sMaterial, nCantidadRequerida, sFragId, sDialogId;
             if (sGrupo === "ALM") {
                 // Alambre → usa /material (comp1) → dialog Alm
-                sMaterial          = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material")         : "";
+                sMaterial = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material") : "";
                 nCantidadRequerida = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/cantidadNecesaria") : 0;
-                sFragId   = oView.getId() + "--Alm";
+                sFragId = oView.getId() + "--Alm";
                 sDialogId = "Alm--batchListDialog";
             } else {
                 // Solera → usa /material2 (comp2) → dialog Sol
-                sMaterial          = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material2")          : "";
+                sMaterial = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/material2") : "";
                 nCantidadRequerida = oOrderSummaryModel ? oOrderSummaryModel.getProperty("/cantidadNecesaria2") : 0;
-                sFragId   = oView.getId();
+                sFragId = oView.getId();
                 sDialogId = "batchListDialog";
             }
 
@@ -1672,10 +1782,12 @@ sap.ui.define([
                         var sMat = oItem.material;
                         var sLote = oItem.batchNumber;
                         var nCantidad = parseFloat((oItem.quantityOnHand && oItem.quantityOnHand.value) || 0);
+                        var unidadMedida = oItem.quantityOnHand ? oItem.quantityOnHand.internalUnitOfMeasure : "";
                         return {
                             MATERIAL: sMat,
                             LOTE: sLote,
                             CANTIDAD: nCantidad.toFixed(2),
+                            UNIDAD_MEDIDA: unidadMedida,
                             CODIGO: sMat + "!" + sLote
                         };
                     });
@@ -1780,6 +1892,16 @@ sap.ui.define([
                     function (oRes) {
                         // Error callback
                         resolve("Error");
+                    }.bind(this));
+            });
+        },
+        getConversionMaterial: function (sParams, oSapApi) {
+            return new Promise((resolve, reject) => {
+                this.ajaxGetRequest(oSapApi + this.ApiPaths.MATERIALS, sParams, function (oRes) {
+                    resolve(oRes);
+                }.bind(this),
+                    function (oRes) {
+                        reject(oRes);
                     }.bind(this));
             });
         },

@@ -6,7 +6,7 @@
      id="batchListDialog"
      title="{i18n>fragmentTitle}"
      placement="Bottom"
-     contentWidth="700px"
+     contentWidth="900px"
      afterClose=".onAfterClosePopoverInventario">
 
     <content>
@@ -33,7 +33,7 @@
             <cells>
               <Text text="{MATERIAL}"/>
               <Text text="{LOTE}"/>
-              <Text text="{CANTIDAD}"/>
+              <ObjectAttribute text="{CANTIDAD} {UNIDAD_MEDIDA}" />
               <Link text="{CODIGO}" press=".onCopiarCodigo"/>
             </cells>
           </ColumnListItem>
