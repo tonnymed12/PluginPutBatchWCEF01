@@ -337,14 +337,20 @@ sap.ui.define([
                     this.ajaxPostRequest(urlLote, inParams,
                         function (oRes) {
                             var bIsSolR = sMatSolRefresh && sMaterial.toUpperCase() === sMatSolRefresh;
+                            var sNuevaQtyKg = parseFloat(oRes.outCantidadLote || 0).toFixed(2);
+                            var sPartsSlot = slot.value.split('!');
                             if (bIsSolR && this._solConvFactor && this._solConvFactor.factor !== 1) {
                                 var fPcR = parseFloat(oRes.outCantidadLote || 0) * this._solConvFactor.factor;
                                 slot.loteQty = fPcR.toFixed(2);
                                 slot.loteUom = this._solConvFactor.uom;
+                                slot.cantidadAsignada = fPcR.toFixed(2);
                             } else {
                                 slot.loteQty = this._formatLoteQty(oRes.outCantidadLote);
                                 slot.loteUom = oRes.outOUMLote || "";
+                                slot.cantidadAsignada = slot.loteQty;
                             }
+                            // Sincronizar slot.value: CANTIDAD_ASIGNADA y CANTIDAD_PENDIENTE con la nueva cantidad (KG para backend)
+                            slot.value = sPartsSlot[0] + '!' + sPartsSlot[1] + '!' + sNuevaQtyKg + '!' + (sPartsSlot[3] || "") + '!' + sNuevaQtyKg;
                             resolve({ slot: slot, ok: true });
                         }.bind(this),
                         function () {
@@ -365,6 +371,33 @@ sap.ui.define([
                 var aFinalSol = (oModelSol && oModelSol.getProperty("/ITEMS")) || [];
                 var aFinalAlm = (oModelAlm && oModelAlm.getProperty("/ITEMS")) || [];
                 this._updateOrderSummaryScannedQty(aFinalSol, aFinalAlm);
+
+                // Persistir las cantidades actualizadas en los custom values del puesto
+                var aEdited = aFinalSol.concat(aFinalAlm).map(function (slot) {
+                    return { attribute: slot.attribute, value: slot.value || "" };
+                });
+                var sParamsWC = { plant: oPODParams.PLANT_ID, workCenter: oPODParams.WORK_CENTER };
+                this.getWorkCenterCustomValues(sParamsWC, oSapApi).then(function (oOriginalRes) {
+                    var aOriginal = (oOriginalRes && oOriginalRes.customValues) || [];
+                    var aEditMap = {};
+                    aEdited.forEach(function (item) { aEditMap[item.attribute] = item.value; });
+                    var aCustomValuesFinal = aOriginal.map(function (item) {
+                        return {
+                            attribute: item.attribute,
+                            value: aEditMap.hasOwnProperty(item.attribute) ? aEditMap[item.attribute] : item.value
+                        };
+                    });
+                    for (var sKey in aEditMap) {
+                        if (!aCustomValuesFinal.find(function (i) { return i.attribute === sKey; })) {
+                            aCustomValuesFinal.push({ attribute: sKey, value: aEditMap[sKey] });
+                        }
+                    }
+                    this.setCustomValuesPp({
+                        inCustomValues: aCustomValuesFinal,
+                        inPlant: oPODParams.PLANT_ID,
+                        inWorkCenter: oPODParams.WORK_CENTER
+                    }, oSapApi);
+                }.bind(this));
 
                 var iFailed = aResults.filter(function (r) { return !r.ok; }).length;
                 if (iFailed > 0) {
